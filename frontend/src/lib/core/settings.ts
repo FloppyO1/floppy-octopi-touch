@@ -8,9 +8,10 @@
 import { defaultCapabilityOverrides, type CapabilityOverrides } from './capabilities';
 import { SORT_KEYS, type SortDirection, type SortKey } from './files';
 import { MACRO_COLORS, MACRO_ICONS } from './macros';
+import { sanitizeActions, type CustomAction } from './power';
 import { defaultTerminalFilters, type TerminalFilters } from './terminal';
 
-export const SETTINGS_VERSION = 6;
+export const SETTINGS_VERSION = 7;
 
 export type Language = 'en' | 'it';
 export const LANGUAGES: readonly Language[] = ['en', 'it'];
@@ -107,6 +108,10 @@ export interface Settings {
   webcam: { url: string };
   home: { preview: HomePreview };
   files: { sort: SortKey; direction: SortDirection; view: FileView };
+  /** Power and lights buttons (System screen, optionally the status bar). */
+  customActions: CustomAction[];
+  /** PSU Control plugin: also show its switch in the status bar. */
+  psu: { statusBar: boolean };
 }
 
 /** Presets of a fresh install (also used by "restore defaults"). */
@@ -169,6 +174,8 @@ export function defaultSettings(): Settings {
     webcam: { url: '' },
     home: { preview: 'thumbnail' },
     files: { sort: 'date', direction: 'desc', view: 'grid' },
+    customActions: [],
+    psu: { statusBar: false },
   };
 }
 
@@ -189,6 +196,8 @@ const MIGRATIONS: Record<number, (doc: Doc) => Doc> = {
   4: (doc) => doc,
   // v6 (session 7): `terminal.filters` and `leveling` from the defaults.
   5: (doc) => doc,
+  // v7 (session 8): `customActions` and `psu` from the defaults.
+  6: (doc) => doc,
 };
 
 const isObject = (v: unknown): v is Doc => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -252,6 +261,7 @@ export function migrateSettings(raw: unknown): MigrationResult {
     color: (MACRO_COLORS as readonly string[]).includes(m.color) ? m.color : 'neutral',
     confirm: m.confirm === true,
   }));
+  settings.customActions = sanitizeActions(settings.customActions);
   const overrides = settings.capabilities.overrides as Record<string, string>;
   for (const [key, value] of Object.entries(overrides)) {
     if (!['auto', 'on', 'off'].includes(value)) overrides[key] = 'auto';

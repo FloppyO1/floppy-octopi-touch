@@ -9,6 +9,16 @@ server:
     enabled: false
   pluginBlacklist:
     enabled: false
+  # Harmless stand-ins so the System screen shows reboot/shutdown (OctoPi sets the real ones).
+  commands:
+    systemRestartCommand: echo "[dev] system reboot requested"
+    systemShutdownCommand: echo "[dev] system shutdown requested"
+# A custom system command, listed by /api/system/commands (source "custom").
+system:
+  actions:
+    - action: lights
+      name: Toggle lights (dev)
+      command: echo "[dev] lights toggled"
 serial:
   autoconnect: true
   port: VIRTUAL

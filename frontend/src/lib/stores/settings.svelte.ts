@@ -47,6 +47,14 @@ class SettingsStore {
     this.update((s) => (s.accent = accent));
   }
 
+  /** Back to a fresh install (presets, macros and actions included), saved at once. */
+  async reset(): Promise<void> {
+    this.value = defaultSettings();
+    setLocale(this.value.language);
+    applyAccent(this.value.accent);
+    await this.flush();
+  }
+
   /** Writes pending changes now. */
   async flush(): Promise<void> {
     if (this.timer) clearTimeout(this.timer);

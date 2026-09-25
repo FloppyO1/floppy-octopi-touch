@@ -17,6 +17,8 @@ from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from .commands import CommandError, run_command
+
 log = logging.getLogger(__name__)
 
 GCODE_EXTENSIONS = (".gcode", ".gco", ".g")
@@ -146,18 +148,9 @@ class UsbManager:
         if self.eject_command:
             args = [part.replace("{path}", str(mount.path)) for part in self.eject_command]
             try:
-                proc = await asyncio.create_subprocess_exec(
-                    *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-                )
-                _, stderr = await asyncio.wait_for(proc.communicate(), EJECT_TIMEOUT_S)
-            except FileNotFoundError:
-                raise ApiError(503, "eject_failed", f"{args[0]} is not installed") from None
-            except TimeoutError:
-                proc.kill()
-                raise ApiError(503, "eject_failed", "eject command timed out") from None
-            if proc.returncode != 0:
-                detail = stderr.decode(errors="replace").strip() or f"exit {proc.returncode}"
-                raise ApiError(503, "eject_failed", detail)
+                await run_command(args, EJECT_TIMEOUT_S)
+            except CommandError as exc:
+                raise ApiError(503, "eject_failed", str(exc)) from None
             log.info("usb: ejected %s", mount.path)
         else:
             log.info("usb: %s ejected (no eject command configured: only hidden)", mount.path)

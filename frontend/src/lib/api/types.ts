@@ -298,3 +298,50 @@ export interface UsbImportResult {
   /** Path in OctoPrint's local storage. */
   path: string;
 }
+
+/** One network interface of the Pi (`/local/system`). */
+export interface NetworkInterface {
+  name: string;
+  /** `/sys/class/net/<name>/operstate`: up, down, dormant, unknown… */
+  state: string;
+  mac: string | null;
+  ipv4: string | null;
+  wireless: boolean;
+}
+
+export interface NetworkInfo {
+  /** Interface of the default route (else the first with an address). */
+  primary: string | null;
+  gateway: string | null;
+  interfaces: NetworkInterface[];
+  /** First radio (the one of the default route); `ssid` only with NetworkManager. */
+  wifi: { interface: string; connected: boolean; ssid: string | null; signal: number | null } | null;
+}
+
+/** `GET /local/system`: sizes in bytes, frequencies in MHz, temperatures in °C. */
+export interface SystemInfo {
+  version: string;
+  hostname: string;
+  uptime: number | null;
+  cpu: {
+    percent: number | null;
+    cores: number | null;
+    temperature: number | null;
+    frequency: number | null;
+    maxFrequency: number | null;
+    load: [number, number, number] | null;
+  };
+  memory: { total: number; used: number; percent: number } | null;
+  disk: { path: string; total: number; used: number; free: number; percent: number | null } | null;
+  network: NetworkInfo;
+}
+
+/** `GET/PUT /local/apikey`: never the key itself. */
+export interface ApiKeyState {
+  configured: boolean;
+  /** Last four characters, e.g. `…a1b2`. */
+  hint: string | null;
+  source: 'env' | 'file' | 'none';
+  /** False when the key comes from the environment (it wins again at the next start). */
+  persistent: boolean;
+}

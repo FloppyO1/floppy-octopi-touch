@@ -1,6 +1,6 @@
 /** Endpoints served by the FloppyOctoTouch agent itself (`/local/*`). */
 import { getJson, HttpError, postJson, putJson, query } from './http';
-import type { AgentHealth, UsbImportResult, UsbListing, UsbMount } from './types';
+import type { AgentHealth, ApiKeyState, SystemInfo, UsbImportResult, UsbListing, UsbMount } from './types';
 
 export const getAgentHealth = () => getJson<AgentHealth>('/local/health');
 export const getAgentSettings = () => getJson<unknown>('/local/settings');
@@ -8,6 +8,14 @@ export const putAgentSettings = <T>(settings: T) => putJson<T>('/local/settings'
 /** Switches the HDMI output (screen off when idle); a no-op that only logs in development. */
 export const setDisplayPower = (on: boolean) => putJson<{ on: boolean }>('/local/display', { on });
 export const getDisplayState = () => getJson<{ on: boolean }>('/local/display');
+
+/** CPU, memory, disk and network of the Pi. */
+export const getSystemInfo = () => getJson<SystemInfo>('/local/system');
+export const getApiKeyState = () => getJson<ApiKeyState>('/local/apikey');
+/** Checked against OctoPrint by the agent first: 400 bad format, 422 rejected, 502 OctoPrint down. */
+export const putApiKey = (apiKey: string) => putJson<ApiKeyState>('/local/apikey', { apiKey });
+/** Restarts cage + Chromium; `restarted: false` when no command is configured (development). */
+export const restartKiosk = () => postJson<{ restarted: boolean }>('/local/kiosk/restart', {});
 
 /** Thumbnail extracted by the agent from a file of OctoPrint's local storage (404 = none). */
 export const localThumbnailUrl = (path: string, version?: number | null) =>

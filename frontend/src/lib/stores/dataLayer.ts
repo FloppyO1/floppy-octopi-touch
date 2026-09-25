@@ -15,6 +15,7 @@ import { connection } from './connection.svelte';
 import { events } from './events.svelte';
 import { files } from './files.svelte';
 import { notices } from './notices.svelte';
+import { power } from './power.svelte';
 import { leveling } from './leveling.svelte';
 import { job, printer } from './printer.svelte';
 import { prompt } from './prompt.svelte';
@@ -122,7 +123,7 @@ async function loadInitialState(): Promise<void> {
     server.loadProfile(),
     files.refresh(),
   ]);
-  await server.loadLayerValues();
+  await Promise.all([server.loadLayerValues(), power.load()]);
 }
 
 let socket: OctoPrintSocket | null = null;

@@ -112,11 +112,41 @@ describe('migrateSettings', () => {
       ],
     });
     expect(changed).toBe(true);
-    expect(settings.schemaVersion).toBe(6);
+    expect(settings.schemaVersion).toBe(SETTINGS_VERSION);
     expect(settings.terminal.filters).toEqual({ temperature: true, ok: true, busy: true, sd: true, position: false });
     expect(settings.leveling).toEqual({ inset: 25, zHop: 5, babystep: 0.05, meshStep: 0.05 });
     expect(settings.macros).toEqual([
       { id: 'a', name: 'Lights', icon: 'play', color: 'neutral', gcode: 'M355 S1', confirm: false },
+    ]);
+  });
+
+  it('migrates v6 documents to v7: no custom actions, PSU off the status bar, broken actions repaired', () => {
+    expect(migrateSettings({ schemaVersion: 6 }).settings).toMatchObject({
+      schemaVersion: 7,
+      customActions: [],
+      psu: { statusBar: false },
+    });
+    const { settings } = migrateSettings({
+      schemaVersion: 7,
+      customActions: [
+        { id: 'l', name: 'Lights', kind: 'plugin', icon: 'rocket', plugin: { id: 'gpio', command: 'on' } },
+        { name: 'no id' },
+        'junk',
+      ],
+    });
+    expect(settings.customActions).toEqual([
+      {
+        id: 'l',
+        name: 'Lights',
+        icon: 'light',
+        color: 'warn',
+        kind: 'plugin',
+        gcode: '',
+        system: { source: '', action: '' },
+        plugin: { id: 'gpio', command: 'on', data: '' },
+        confirm: false,
+        statusBar: false,
+      },
     ]);
   });
 

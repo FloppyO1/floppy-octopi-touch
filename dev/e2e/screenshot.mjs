@@ -100,10 +100,10 @@ async function shell(page) {
     await page.getByTestId(`nav-${id}`).click();
     await page.waitForSelector(`[data-testid=screen-${id}]`);
   }
-  await page.screenshot({ path: `${OUT}/system.png` });
+  await page.getByTestId('system-tab-settings').click();
   await page.getByTestId('lang-it').click();
   await waitText(page, 'status-phase', (t) => t.includes('Pronta'));
-  await page.screenshot({ path: `${OUT}/system-it.png` });
+  await page.screenshot({ path: `${OUT}/settings-general-it.png` });
   await page.getByTestId('lang-en').click();
   log('screens', 'all 8 rendered, language switch ok');
 
@@ -920,6 +920,235 @@ async function levelingScreen(page) {
   await page.reload();
 }
 
+// Types on the physical keyboard into the open text sheet and confirms it.
+async function typeText(page, text) {
+  await page.waitForSelector('[data-testid=text-input]');
+  await page.keyboard.type(text);
+  await page.getByTestId('text-input-ok').click();
+  await page.waitForSelector('[data-testid=text-input]', { state: 'detached' });
+}
+
+const confirmWith = async (page, label) => {
+  await page.getByTestId('confirm-dialog').getByRole('button', { name: label, exact: true }).click();
+  await page.waitForSelector('[data-testid=confirm-dialog]', { state: 'detached' });
+};
+
+const DEV_API_KEY = process.env.OCTOPRINT_API_KEY ?? 'floppyoctotouch-dev-api-key-not-secret';
+
+// System: host rings, network, system commands (mocked: nothing reboots), custom actions with the
+// status bar, every settings section, capability override, API key, reset, About.
+async function systemScreen(page) {
+  await page.goto(`${BASE_URL}/#/system`);
+  // Leftovers of an interrupted run would clash with the names used below.
+  await patchSettings(page, { customActions: [] });
+  await page.reload();
+  await page.waitForSelector('[data-testid=connection-overlay]', { state: 'detached', timeout: 60_000 });
+  await waitText(page, 'gauge-ram', (t) => /\d/.test(t));
+  await waitText(page, 'net-ip', (t) => /^\d+\.\d+\.\d+\.\d+$/.test(t));
+  await waitText(page, 'status-network', (t) => /\d+\.\d+\.\d+\.\d+/.test(t));
+  await page.waitForSelector('[data-testid=syscmd-shutdown]');
+  await page.waitForTimeout(800); // ring transitions
+  await page.screenshot({ path: `${OUT}/system.png` });
+  log('system', `${(await text(page, 'net-ip')).trim()} · ${(await text(page, 'gauge-cpu')).replace(/\s+/g, ' ').trim()}`);
+
+  // Reboot: confirmation, then the POST (intercepted: the dev container must not act on it).
+  const calls = [];
+  const handler = (route) => {
+    if (route.request().method() !== 'POST') return route.continue();
+    calls.push(new URL(route.request().url()).pathname);
+    return route.fulfill({ status: 204 });
+  };
+  await page.route('**/api/system/commands/core/*', handler);
+  await page.getByTestId('syscmd-reboot').click();
+  await page.waitForSelector('[data-testid=confirm-dialog]');
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: `${OUT}/system-reboot.png` });
+  await confirmWith(page, 'Reboot the Pi');
+  await page.getByText('The Raspberry Pi is rebooting…').waitFor();
+  await page.unroute('**/api/system/commands/core/*', handler);
+  if (calls.join() !== '/api/system/commands/core/reboot') throw new Error(`system commands sent: ${calls}`);
+  // A custom OctoPrint command (an `echo` in dev) really runs.
+  await page.getByTestId('syscmd-lights').click();
+  await confirmWith(page, 'Run');
+  await page.getByText('Toggle lights (dev) started').waitFor();
+  // Screen restart: no kiosk command in dev, so the page reloads.
+  await page.getByTestId('kiosk-restart').click();
+  await Promise.all([page.waitForEvent('load', { timeout: 15_000 }), confirmWith(page, 'Restart the screen')]);
+  await page.waitForSelector('[data-testid=connection-overlay]', { state: 'detached', timeout: 60_000 });
+  log('system commands', 'reboot confirmed (mocked), custom OctoPrint command run, screen restarted');
+
+  // Custom actions: a G-code one in the status bar, a system command one, a plugin one rejected.
+  await page.getByTestId('actions-manage').click();
+  await page.getByTestId('action-add').click();
+  await page.getByTestId('action-name').click();
+  await typeText(page, 'Case light');
+  await page.getByTestId('action-gcode').click();
+  await typeText(page, 'M355 S1');
+  await page.getByTestId('action-statusbar').getByRole('switch').click();
+  await page.getByTestId('action-color-ok').click();
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: `${OUT}/action-editor.png` });
+  await page.getByTestId('action-save').click();
+  await page.waitForSelector('[data-testid=action-editor]', { state: 'detached' });
+
+  await page.getByTestId('action-add').click();
+  await page.getByTestId('action-name').click();
+  await typeText(page, 'Lights');
+  await page.getByTestId('action-kind-system').click();
+  await page.getByTestId('action-system').click();
+  await page.getByRole('option', { name: 'Toggle lights (dev)' }).click();
+  await page.getByTestId('action-save').click();
+  await page.waitForSelector('[data-testid=action-editor]', { state: 'detached' });
+
+  await page.getByTestId('action-add').click();
+  await page.getByTestId('action-name').click();
+  await typeText(page, 'Relay');
+  await page.getByTestId('action-kind-plugin').click();
+  await page.getByTestId('action-plugin-id').click();
+  await typeText(page, 'psucontrol');
+  await page.getByTestId('action-plugin-command').click();
+  await typeText(page, 'togglePSU');
+  await page.getByTestId('action-plugin-data').click();
+  await typeText(page, '[1]');
+  await page.getByTestId('action-save').click();
+  await waitText(page, 'action-error', (t) => t.includes('JSON object'));
+  await page.screenshot({ path: `${OUT}/action-error.png` });
+  await page.getByTestId('action-editor').getByRole('button', { name: 'Cancel', exact: true }).click();
+  await page.waitForSelector('[data-testid=action-editor]', { state: 'detached' });
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: `${OUT}/action-manager.png` });
+  await closeModal(page, 'action-manager');
+
+  const lightId = await page.$eval('[data-testid^=status-action-]', (el) => el.dataset.testid.slice('status-action-'.length));
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: `${OUT}/system-actions.png` });
+  await page.getByTestId(`status-action-${lightId}`).click();
+  await page.getByText('Case light sent').waitFor();
+  if (DEV) await page.waitForFunction(() => window.__fot.terminal.lines.some((l) => l.text.includes('M355 S1')));
+  await page.getByRole('button', { name: 'Lights', exact: true }).click();
+  await page.getByText('Lights sent').waitFor();
+  log('custom actions', 'G-code from the status bar, OctoPrint command, bad plugin JSON rejected');
+
+  // Settings: every section renders; values go through the NumPad and the stored document.
+  await page.getByTestId('system-tab-settings').click();
+  for (const section of ['general', 'display', 'temperature', 'motion', 'firmware', 'power', 'connection']) {
+    await page.getByTestId(`settings-${section}`).click();
+    await page.waitForSelector(`[data-testid=settings-panel-${section}]`);
+    await page.waitForTimeout(250);
+    await page.screenshot({ path: `${OUT}/settings-${section}.png` });
+  }
+  const stored = () => page.evaluate(async () => (await fetch('/local/settings')).json());
+  await page.getByTestId('settings-display').click();
+  await page.getByTestId('saver-timeout').click();
+  await numpadEnter(page, '12');
+  await page.waitForTimeout(700); // debounced save
+  if ((await stored()).screensaver.timeoutMin !== 12) throw new Error('screensaver timeout not saved');
+  await page.getByTestId('saver-timeout').click();
+  await numpadEnter(page, '5');
+
+  await page.getByTestId('settings-firmware').click();
+  await waitText(page, 'firmware-name', (t) => t.startsWith('Marlin'));
+  await page.getByTestId('cap-manualMesh-on').click();
+  await page.waitForTimeout(700);
+  if ((await stored()).capabilities.overrides.manualMesh !== 'on') throw new Error('capability override not saved');
+  await page.getByTestId('cap-manualMesh-auto').click();
+  log('settings', '7 sections, screensaver 12 min saved, manual mesh forced on and back to auto');
+
+  // API key: a wrong key is refused by OctoPrint, the right one is saved and the page reconnects.
+  await page.getByTestId('settings-connection').click();
+  const hint = DEV_API_KEY.slice(-4);
+  await waitText(page, 'apikey-state', new Function(`return (t) => t.includes(${JSON.stringify(hint)})`)());
+  await page.getByTestId('apikey-change').click();
+  await typeText(page, 'this-key-is-wrong-0123456789');
+  await page.getByText('OctoPrint rejected this key: nothing changed.').waitFor();
+  await page.getByTestId('apikey-change').click();
+  await typeText(page, DEV_API_KEY);
+  await page.getByText(/API key (saved|in use)/).waitFor();
+  await page.waitForEvent('load', { timeout: 15_000 });
+  await page.waitForSelector('[data-testid=connection-overlay]', { state: 'detached', timeout: 60_000 });
+  log('api key', 'wrong key refused, dev key saved, reconnected after the reload');
+
+  // Reset: everything back to the defaults (the custom actions go too).
+  await page.getByTestId('system-tab-settings').click();
+  await page.getByTestId('settings-reset').click();
+  await page.waitForSelector('[data-testid=confirm-dialog]');
+  await confirmWith(page, 'Reset all settings');
+  await page.getByText('Settings reset').waitFor();
+  if ((await stored()).customActions.length) throw new Error('reset kept the custom actions');
+  await page.waitForSelector('[data-testid^=status-action-]', { state: 'detached' });
+
+  await page.getByTestId('system-tab-about').click();
+  await waitText(page, 'about-version', (t) => /^v\d+\.\d+\.\d+/.test(t));
+  await page.waitForTimeout(250);
+  await page.screenshot({ path: `${OUT}/system-about.png` });
+
+  // Italian overview.
+  await page.getByTestId('system-tab-settings').click();
+  await page.getByTestId('settings-general').click();
+  await page.getByTestId('lang-it').click();
+  await page.getByTestId('system-tab-overview').click();
+  await page.waitForTimeout(500);
+  await page.screenshot({ path: `${OUT}/system-it.png` });
+  await page.getByTestId('system-tab-settings').click();
+  await page.getByTestId('lang-en').click();
+  await page.waitForTimeout(700);
+  log('reset / about', 'settings reset to the defaults, About shows the version');
+
+  // PSU Control is not installed in dev: the test answers its settings key and SimpleApi.
+  let psuOn = true;
+  const psuCalls = [];
+  const settingsRoute = async (route) => {
+    const response = await route.fetch();
+    const json = await response.json();
+    json.plugins = { ...json.plugins, psucontrol: {} };
+    await route.fulfill({ response, json });
+  };
+  const psuRoute = (route) => {
+    if (route.request().method() === 'POST') {
+      const { command } = route.request().postDataJSON();
+      psuCalls.push(command);
+      psuOn = command === 'turnPSUOn';
+    }
+    return route.fulfill({ json: { isPSUOn: psuOn } });
+  };
+  await page.route('**/api/settings', settingsRoute);
+  await page.route('**/api/plugin/psucontrol', psuRoute);
+  await patchSettings(page, { psu: { statusBar: true } });
+  await page.reload();
+  await page.waitForSelector('[data-testid=status-psu]', { timeout: 30_000 });
+  await waitText(page, 'psu-toggle', (t) => t.trim().endsWith('On'));
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: `${OUT}/system-psu.png` });
+  await page.getByTestId('status-psu').click();
+  await confirmWith(page, 'Turn off');
+  await waitText(page, 'psu-toggle', (t) => t.trim().endsWith('Off'));
+  await page.getByTestId('psu-toggle').click(); // turning on does not ask
+  await waitText(page, 'psu-toggle', (t) => t.trim().endsWith('On'));
+  if (psuCalls.join() !== 'turnPSUOff,turnPSUOn') throw new Error(`PSU commands: ${psuCalls}`);
+  await page.unroute('**/api/settings', settingsRoute);
+  await page.unroute('**/api/plugin/psucontrol', psuRoute);
+  await patchSettings(page, { psu: { statusBar: false } });
+  log('psu control', 'status bar switch: off after the confirmation, on at once');
+
+  // No API key accepted: the connection overlay offers to enter one, the keyboard shows above it.
+  const health = (route) =>
+    route.fulfill({
+      json: { status: 'ok', version: '0', apiKeyConfigured: true, octoprint: { reachable: true, authorized: false, version: null } },
+    });
+  await page.route('**/local/health', health);
+  await page.reload();
+  await page.waitForSelector('[data-testid=overlay-apikey]', { timeout: 15_000 });
+  await page.getByTestId('overlay-apikey').click();
+  await page.waitForSelector('[data-testid=text-input]');
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: `${OUT}/overlay-apikey.png` });
+  await page.keyboard.press('Escape');
+  await page.unroute('**/local/health', health);
+  await page.reload();
+  await page.waitForSelector('[data-testid=connection-overlay]', { state: 'detached', timeout: 60_000 });
+  log('overlay api key', 'offered when the key is rejected, keyboard above the overlay');
+}
+
 async function kiosk(page) {
   await page.goto(`${BASE_URL}/?kiosk=1#/home`);
   await page.waitForSelector('[data-testid=gauge-hotend]');
@@ -962,6 +1191,7 @@ try {
     ['terminal', terminalScreen, true],
     ['macros', macrosScreen, true],
     ['leveling', levelingScreen, true],
+    ['system', systemScreen, true],
     ['print', printFlow, true],
     ['screensaver', screensaver, DEV],
     ['kiosk', kiosk, true],

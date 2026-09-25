@@ -9,6 +9,8 @@ from __future__ import annotations
 import asyncio
 import logging
 
+from .commands import CommandError, run_command
+
 log = logging.getLogger(__name__)
 
 BACKENDS = ("wlr-randr", "none")
@@ -36,22 +38,10 @@ class Display:
             if self.backend == "none":
                 log.info("display %s (backend 'none': nothing switched)", "on" if on else "off")
             else:
-                await self._wlr_randr(on)
+                args = ["wlr-randr", "--output", self.output, "--on" if on else "--off"]
+                try:
+                    await run_command(args, COMMAND_TIMEOUT_S)
+                except CommandError as exc:
+                    raise DisplayError(str(exc)) from None
+                log.info("display %s (%s)", "on" if on else "off", self.output)
             self.on = on
-
-    async def _wlr_randr(self, on: bool) -> None:
-        args = ["wlr-randr", "--output", self.output, "--on" if on else "--off"]
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-            )
-            _, stderr = await asyncio.wait_for(proc.communicate(), COMMAND_TIMEOUT_S)
-        except FileNotFoundError:
-            raise DisplayError("wlr-randr is not installed") from None
-        except TimeoutError:
-            proc.kill()
-            raise DisplayError("wlr-randr timed out") from None
-        if proc.returncode != 0:
-            detail = stderr.decode(errors="replace").strip() or f"exit status {proc.returncode}"
-            raise DisplayError(f"wlr-randr failed: {detail}")
-        log.info("display %s (%s)", "on" if on else "off", self.output)

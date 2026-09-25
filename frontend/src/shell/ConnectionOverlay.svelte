@@ -1,9 +1,13 @@
 <script lang="ts">
   // Blocks the whole UI while OctoPrint (through the agent) is not reachable: nothing works without it.
+  import KeyRound from '@lucide/svelte/icons/key-round';
   import { fade } from 'svelte/transition';
   import { t } from '../lib/i18n/index.svelte';
   import { connection } from '../lib/stores';
+  import Button from '../lib/ui/Button.svelte';
+  import { dialogs } from '../lib/ui/dialogs.svelte';
   import Spinner from '../lib/ui/Spinner.svelte';
+  import { changeApiKey } from '../screens/system/actions';
 
   /** Avoids a flash of the overlay while the socket connects at startup. */
   const SHOW_DELAY_MS = 800;
@@ -30,12 +34,16 @@
 </script>
 
 {#if visible}
-  <div class="overlay" role="alertdialog" aria-live="assertive" data-testid="connection-overlay" transition:fade|global={{ duration: 200 }}>
+  <!-- Below the dialogs while one is open (the API key keyboard), above everything else. -->
+  <div class="overlay" class:behind={dialogs.stack.length > 0} role="alertdialog" aria-live="assertive" data-testid="connection-overlay" transition:fade|global={{ duration: 200 }}>
     <div class="box">
       <div class="brand">FloppyOctoTouch</div>
       <Spinner size={56} />
       <h2>{t('overlay.connecting')}</h2>
       <p data-testid="connection-reason">{t(`overlay.${reason}`)}</p>
+      {#if reason === 'noApiKey' || reason === 'unauthorized'}
+        <Button variant="primary" size="lg" icon={KeyRound} onclick={changeApiKey} data-testid="overlay-apikey">{t('apikey.enter')}</Button>
+      {/if}
       <p class="hint">{t('overlay.retrying')}</p>
     </div>
   </div>
@@ -49,6 +57,9 @@
     display: grid;
     place-items: center;
     background: rgb(12 14 18 / 0.94);
+  }
+  .behind {
+    z-index: var(--z-overlay);
   }
   .box {
     display: flex;

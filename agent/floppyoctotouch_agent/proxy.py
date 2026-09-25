@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Callable
 
 import aiohttp
 from aiohttp import web
@@ -39,7 +40,8 @@ class OctoPrintProxy:
     name = "OctoPrint"
     unreachable = "octoprint_unreachable"
 
-    def __init__(self, upstream: str, api_key: str) -> None:
+    def __init__(self, upstream: str, api_key: Callable[[], str]) -> None:
+        # A callable: the key can be replaced at runtime (System → API key).
         self.upstream = URL(upstream)
         self.api_key = api_key
 
@@ -48,8 +50,8 @@ class OctoPrintProxy:
 
     def _upstream_headers(self, request: web.Request) -> dict[str, str]:
         headers = {k: v for k, v in request.headers.items() if k.lower() not in _DROP_REQUEST}
-        if self.api_key:
-            headers["X-Api-Key"] = self.api_key
+        if key := self.api_key():
+            headers["X-Api-Key"] = key
         return headers
 
     async def handle(self, request: web.Request) -> web.StreamResponse:
@@ -94,7 +96,8 @@ class OctoPrintProxy:
         target = self.target(request).with_scheme(
             "wss" if self.upstream.scheme == "https" else "ws"
         )
-        headers = {"X-Api-Key": self.api_key} if self.api_key else {}
+        key = self.api_key()
+        headers = {"X-Api-Key": key} if key else {}
 
         try:
             upstream = await session.ws_connect(target, headers=headers, max_msg_size=0)
@@ -147,7 +150,7 @@ class WebcamProxy(OctoPrintProxy):
     unreachable = "webcam_unreachable"
 
     def __init__(self, upstream: str) -> None:
-        super().__init__(upstream, "")
+        super().__init__(upstream, lambda: "")
 
     def target(self, request: web.Request) -> URL:
         rest = request.raw_path.removeprefix("/webcam").lstrip("/")

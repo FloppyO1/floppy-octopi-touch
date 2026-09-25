@@ -9,7 +9,7 @@ from aiohttp import WSMsgType, web
 from floppyoctotouch_agent.app import create_app
 from floppyoctotouch_agent.config import Config
 
-API_KEY = "test-key"
+API_KEY = "test-api-key-0123456789abcdef"
 # dev/sample-gcode, mounted at /samples by the agent-test service.
 SAMPLES = Path(os.environ.get("FOT_SAMPLES", "/samples"))
 # OctoPrint storage of the fake server: {"folder/name.gcode": bytes}; uploads land here too.
@@ -105,6 +105,8 @@ def make_client(aiohttp_client, upstream, tmp_path):
             "uploads_dir": tmp_path / "uploads",
             "usb_roots": [tmp_path / "media" / "usb*"],
             "usb_eject_command": [],
+            "kiosk_restart_command": [],
+            "config_path": tmp_path / "config.json",
         }
         config = Config(**(values | overrides))
         return await aiohttp_client(create_app(config))

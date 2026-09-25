@@ -78,6 +78,8 @@ services:
       FOT_WEBCAM_URL: http://webcam:8080
       # No HDMI output to switch in Docker: /local/display only logs.
       FOT_DISPLAY_BACKEND: none
+      # No kiosk session in Docker: "restart kiosk" only logs.
+      FOT_KIOSK_RESTART_COMMAND: none
     ports:
       - "127.0.0.1:${AGENT_PORT:-8765}:8765"
     volumes:
