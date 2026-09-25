@@ -40,6 +40,8 @@ docker compose -f dev/docker-compose.yml run --rm build          # frontend/dist
 docker compose -f dev/docker-compose.yml run --rm playwright     # smoke test + screenshots -> dev/screenshots
 docker compose -f dev/docker-compose.yml run --rm -e ONLY=terminal,leveling playwright   # only some steps
 docker compose -f dev/docker-compose.yml run --rm shellcheck
+docker compose -f dev/docker-compose.yml run --rm release          # release/floppyoctotouch-<version>.tar.gz + .sha256
+docker compose -f dev/docker-compose.yml run --rm deploy-test      # installer test (needs the tarball in release/)
 docker compose -f dev/docker-compose.yml down -v             # wipe OctoPrint/agent data (re-seed)
 ```
 
@@ -100,7 +102,10 @@ dev/sample-gcode/              samples with PrusaSlicer PNG/QOI and OrcaSlicer t
                                + 3dbenchy_prusaslicer.gcode (real export, Tatara A8 profile, 300x300 PNG, ~45 min)
 dev/fake-usb/                  mounted read-only in the agent as /media/usb0, writable in playwright (/fake-usb)
 dev/fake-webcam/server.py      MJPEG test pattern (ffmpeg testsrc) on :8080, service `webcam`
-deploy/, scripts/              placeholders (session 9)
+deploy/                        install.sh, update.sh, uninstall.sh, lib/common.sh, systemd/*.service.in, pam/, udev/,
+                               sudoers/, kiosk/ (kiosk.sh + kiosk.env), usb/usb-mount.sh (udev + systemd-mount)
+scripts/build-release.sh       release tarball (service `release`) -> release/ (only the latest, committed)
+dev/deploy-test/               installer test on Debian bookworm (run.sh, fake_octoprint.py; service `deploy-test`)
 ```
 
 ## Gotchas
@@ -180,14 +185,19 @@ deploy/, scripts/              placeholders (session 9)
   not installed: the smoke test fakes its `plugins` key in `/api/settings` and its SimpleApi with `page.route`.
 - The agent's `/local/apikey` writes the key into `config_path` (`FOT_CONFIG`, default
   `~/.config/floppyoctotouch/config.json`); in Docker `FOT_API_KEY` wins again at the next start.
+- Deploy scripts: after changing anything in `deploy/` rebuild the tarball (`run --rm release`) before
+  `deploy-test`, which only installs what is in `release/`. The release tarball is committed: regenerate it at every
+  version bump (the build deletes older ones). `deploy-test` has no systemd as PID 1: units are enabled, never
+  started (cage, logind, udev and wlr-randr are only verifiable on the Pi).
+- Shell scripts that source `deploy/lib/common.sh` use `# shellcheck source=SCRIPTDIR/lib/common.sh` (shellcheck
+  runs from the repo root with `-x`).
 
 ## Current state
 
-v0.8.0 (session 8): System screen with Overview (CPU/RAM/disk rings from `/local/system`, network, OctoPrint
-restart, Pi reboot/shutdown, custom system commands, screen restart, PSU Control and custom power/light actions),
-Settings (general, screen, temperatures, motion, firmware capability overrides, power & lights, connection with
-the API key checked and saved by the agent) and About; status bar with network/IP and up to 3 quick actions;
-the connection overlay offers to enter the API key; settings schema v7. Terminal/Macros/Leveling (session 7),
-Temperature/Move/Filament (session 6), Files (session 5), Home/screensaver/notices (session 4), design system
-and shell (session 3, accent teal). Next: session 9 (installer for the Pi).
+v0.9.0 (session 9): Pi installer (`deploy/install.sh`, idempotent; from a clone it installs the tarball in
+`release/`), agent + kiosk systemd units (cage + Chromium on tty1 via a PAM/logind session), read-only USB automount
+(udev + `systemd-mount` on `/media/usb-<label>`), sudo rule for eject/kiosk restart, optional display lines in
+`config.txt`/`cmdline.txt`, `floppyoctotouch-update`/`-uninstall`, release build and a bookworm installer test.
+Not yet run on a real Pi. Before: every screen (sessions 3-8, System/settings in 8). Next: session 10 (real Pi
+checklist and polish).
 See `docs/PLAN.md` for details and notes between sessions.

@@ -16,7 +16,8 @@
 └────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-The kiosk, systemd units and installer are planned; today the same topology runs in Docker (see below).
+On the Pi this is installed by `deploy/install.sh` (see "Deployment on the Pi"); in development the same topology
+runs in Docker (see below).
 
 ### Why a local agent
 
@@ -318,6 +319,52 @@ After that REST is only used on events that announce a change:
 Implementation note: keys added to a deep `$state` proxy are not picked up by `in` checks inside an already
 computed `$derived`; stores that are read through such checks use `$state.raw` and replace the object.
 
+## Deployment on the Pi
+
+`scripts/build-release.sh` (service `release`, Node 24 + Python in Docker) builds `frontend/dist` and the agent
+wheel from a clean copy, then packs `floppyoctotouch-<version>/` = `frontend/` (built app), `agent/*.whl`,
+`deploy/`, `VERSION`, README/LICENSE/CHANGELOG into a reproducible tarball (sorted, root-owned, fixed modes,
+`gzip -n`) with a `.sha256`. Only the latest one is kept in `release/`, which is committed: a `git clone` is
+ready to install.
+
+`deploy/install.sh` (bash, `set -euo pipefail`, helpers in `deploy/lib/common.sh`; prompts read `/dev/tty`):
+
+| Step | Detail |
+|---|---|
+| payload | release layout (`VERSION`, `frontend/index.html`, wheel) or a checkout with `frontend/dist`; a plain clone runs the bundled `release/*.tar.gz` instead (checksum, extracted to a temp dir, same options) |
+| checks | bookworm, arm64/armhf (other architectures only warn: test containers), `octoprint.service` read with `systemctl cat` or from the unit files: `User=`, `--port`, `--basedir` (→ `uploads_dir`) |
+| packages | `cage`, `chromium` or `chromium-browser` (whichever is installed or has an apt candidate), `python3-venv`, `wlr-randr`, `fonts-dejavu-core`, `curl`; `apt-get update` only when something is missing |
+| files | `/opt/floppyoctotouch/{frontend,agent,deploy,VERSION}` replaced as new directories (running scripts keep their copy), root-owned; venv in `/opt/floppyoctotouch/venv` (recreated when the system Python changes), agent force-reinstalled from the wheel; `/usr/local/bin/floppyoctotouch-{update,uninstall}` |
+| config | `~/.config/floppyoctotouch/config.json` (dir 700, file 600, owned by the user): only the managed keys are replaced (`octoprint_url`, `host`, `static_dir`, `uploads_dir`, `usb_roots` = `/media/usb-*`, `usb_eject_command`, `kiosk_restart_command`, `display_backend` = `wlr-randr`, `display_output` from the connected `/sys/class/drm/card*-HDMI-A-*`), `api_key` only when a new one was given and accepted by `/api/version` |
+| system files | units rendered from `deploy/systemd/*.in` (`@USER@`, `@UID@`, `@HOME@`, `@PREFIX@`, …), PAM file, `/etc/floppyoctotouch/kiosk.env` (kept once created), sudoers checked with `visudo -c`, udev rule, groups `video`/`render`/`input`; units enabled, `getty@tty1` disabled |
+| display | block between `# >>> FloppyOctoTouch display >>>` markers appended to `config.txt` (`hdmi_group=2`, `hdmi_mode=87`, `hdmi_cvt 1024 600 60 6 0 0 0`, …) and `video=<output>:1024x600@60` appended to `cmdline.txt`, each with a timestamped backup, only when missing |
+| state | `/etc/floppyoctotouch/install.conf`: version, user, LAN flag, the `cmdline.txt` token actually added |
+| start | without systemd as PID 1 (containers) units are only enabled; otherwise agent restarted, `/local/health` polled for 20 s, reboot offered (default yes when the boot files changed), else the kiosk is restarted |
+
+Runtime on the Pi:
+
+| Unit / file | Role |
+|---|---|
+| `floppyoctotouch-agent.service` | `User=` the OctoPrint user, `FOT_CONFIG`, `XDG_RUNTIME_DIR=/run/user/<uid>` + `WAYLAND_DISPLAY=wayland-0` for `wlr-randr`, `Restart=always` |
+| `floppyoctotouch-kiosk.service` | `cage -s -- deploy/kiosk/kiosk.sh` on `TTYPath=/dev/tty1` with `PAMName=floppyoctotouch-kiosk` (`pam_systemd` opens the logind session on seat0, which gives cage the DRM and input devices and creates `XDG_RUNTIME_DIR`), `Conflicts=getty@tty1`, `WLR_LIBINPUT_NO_DEVICES=1` (starts without the touch cable), `EnvironmentFile=-/etc/floppyoctotouch/kiosk.env`, `Restart=always` |
+| `deploy/kiosk/kiosk.sh` | waits for `/local/health`, picks `chromium`/`chromium-browser`, fresh profile in `$XDG_RUNTIME_DIR` (tmpfs: no "restore session", no SD writes), `--kiosk --ozone-platform=wayland --disable-pinch --disable-session-crashed-bubble …` + `FOT_CHROMIUM_FLAGS`, opens `FOT_KIOSK_URL` (default `http://127.0.0.1:8765/?kiosk=1`) |
+| `99-floppyoctotouch-usb.rules` | USB block devices with a file system → `deploy/usb/usb-mount.sh add %k <user>`; removal → `remove %k` |
+| `deploy/usb/usb-mount.sh` | `systemd-mount --no-block --automount=no --collect` (PID 1 does the mount, udev never waits) on `/media/usb-<label>` (label sanitised to `[A-Za-z0-9._-]`, ≤ 32 chars, kernel name as fallback or suffix), `ro,nosuid,nodev,noexec,noatime`; vfat/exfat/ntfs (`ntfs3`) with `--owner=<user>,umask=0022`, ext2-4 as they are; partitions of the root disk skipped. `eject <mount point>` (through sudo) accepts only a mounted `/media/usb-*` backed by `/dev/sd*`, then `sync` + `systemd-mount --umount` |
+| `/etc/sudoers.d/floppyoctotouch` | the user may run, without password, only `systemctl restart floppyoctotouch-kiosk.service` and `usb-mount.sh eject /media/usb-*` |
+
+`deploy/update.sh` verifies the `.sha256`, extracts the tarball, compares versions (`sort -V`; same or older
+version only with a confirmation or `--force`) and runs the new `install.sh --update --user=<saved>` (no key or
+display questions, `kiosk.env`, `config.json` and `settings.json` kept). `deploy/uninstall.sh` stops and removes
+the units, re-enables `getty@tty1`, removes udev/sudoers/PAM files, the display block and the recorded
+`cmdline.txt` token (with backups), `/opt/floppyoctotouch` and `/etc/floppyoctotouch`; the configuration only
+with `--purge` or a yes.
+
+`dev/deploy-test/run.sh` (service `deploy-test`, `debian:bookworm` with `cage` and `chromium` preinstalled, no
+systemd as PID 1) fakes an OctoPi (`pi` user, `octoprint.service`, boot files, a stand-in OctoPrint answering
+`/api/version`) and checks install, config, units (`systemd-analyze verify`), sudo rules, groups, boot files,
+the agent running with the installed config, the kiosk launcher with a fake Chromium, the USB helper with a fake
+`systemd-mount`, a second run (idempotence), update, uninstall and the install from a clone.
+
 ## Development environment
 
 `dev/docker-compose.yml` (project `floppyoctotouch`):
@@ -330,5 +377,6 @@ computed `$derived`; stores that are read through such checks use `$state.raw` a
 | `agent` | `dev/docker/agent.Dockerfile` (Python 3.11) | source mounted, hot reload with `watchfiles` (polling), `dev/fake-usb` mounted as `/media/usb0` (eject command `none`), OctoPrint's volume read-only for the thumbnails (`FOT_UPLOADS_DIR`), webcam → `http://webcam:8080`, display backend `none` |
 | `frontend` | `dev/docker/frontend.Dockerfile` (Node 24) | Vite dev server on 5173 proxying to the agent; `node_modules` in a named volume |
 | `agent-test`, `frontend-test`, `build`, `playwright`, `shellcheck` | profile `tools` | run on demand with `docker compose run --rm <service>` |
+| `release`, `deploy-test` | `dev/docker/release.Dockerfile`, `dev/docker/deploy-test.Dockerfile` (profile `tools`) | release tarball into `release/`; installer test on bookworm with `release/` and `dev/deploy-test` mounted read-only |
 
 All published ports bind to `127.0.0.1`.

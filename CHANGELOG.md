@@ -6,6 +6,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-09-25
+
+### Added
+- `deploy/install.sh` for OctoPi 1.1.0 (Bookworm, arm64/armhf), idempotent: system and OctoPrint checks, the
+  OctoPrint user detected from `octoprint.service` and confirmed, packages (`cage`, `chromium` or
+  `chromium-browser`, `python3-venv`, `wlr-randr`, `fonts-dejavu-core`, `curl`), app and agent venv in
+  `/opt/floppyoctotouch`, API key checked on `/api/version`, `config.json` with mode 600, systemd units for the
+  agent and the kiosk (cage + Chromium on tty1 with a PAM/logind session, restarted when they stop), getty on tty1
+  disabled, optional display settings in `config.txt`/`cmdline.txt` with backups, summary and reboot prompt.
+  Options `--non-interactive`, `--api-key=`, `--user=`, `--octoprint-url=`, `--skip-display-config`,
+  `--listen-lan`. Run from a git clone, it installs the bundled tarball in `release/` after checking its checksum.
+- USB sticks mounted read-only (`nosuid,nodev,noexec`) on `/media/usb-<label>` by a udev rule and
+  `systemd-mount` (FAT32, exFAT, NTFS, ext4; the boot disk is skipped); "Eject" goes through a sudo rule limited
+  to that script and to restarting the kiosk.
+- Kiosk launcher: waits for the agent, fresh Chromium profile in `XDG_RUNTIME_DIR` at every start, Wayland,
+  no pinch/translate/crash bubble; page and extra flags in `/etc/floppyoctotouch/kiosk.env`.
+- `floppyoctotouch-update` (checksum, version comparison, `--force`; keeps key, settings and kiosk options) and
+  `floppyoctotouch-uninstall` (`--purge`, `--keep-display-config`; gives tty1 back to getty, removes the display
+  lines).
+- `scripts/build-release.sh` (Docker service `release`): reproducible `floppyoctotouch-<version>.tar.gz` with the
+  built web app, the agent wheel and `deploy/`, plus `.sha256`; the latest one is committed in `release/`.
+- Development: `deploy-test` service (Debian bookworm) that installs the release and checks config, units,
+  sudo rules, boot files, the running agent, the kiosk launcher, the USB helper, reinstall, update, uninstall and
+  the install from a clone (77 checks). README: installation, update/uninstall, files and troubleshooting.
+
+### Changed
+- USB sticks mounted as `/media/usb-<label>` are shown with their label only.
+
 ## [0.8.0] - 2026-09-25
 
 ### Added

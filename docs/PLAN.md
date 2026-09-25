@@ -454,7 +454,7 @@ _Legenda: `[ ]` da fare · `[~]` in corso (interrotta se la trovi a inizio sessi
 - [x] Sessione 6 — Temperature, Movimento, Filamento (2026-09-25, v0.6.0)
 - [x] Sessione 7 — Terminale, Macro, Livellamento/Mesh (2026-09-25, v0.7.0)
 - [x] Sessione 8 — Sistema e Impostazioni (2026-09-25, v0.8.0)
-- [~] Sessione 9 — Installazione sul Raspberry (iniziata 2026-09-25)
+- [x] Sessione 9 — Installazione sul Raspberry (2026-09-25, v0.9.0; interrotta una volta e ripresa lo stesso giorno)
 - [ ] Sessione 10 — Test reale e rifinitura
 
 ### Note tra sessioni
@@ -900,35 +900,45 @@ _(ogni sessione aggiunge qui decisioni prese, deviazioni dal piano, problemi ape
 - Comandi utili: `curl http://127.0.0.1:8765/local/system`, `curl http://127.0.0.1:8765/local/apikey`;
   `docker compose -f dev/docker-compose.yml run --rm -e ONLY=system playwright`.
 
-**Sessione 9 — INTERROTTA (2026-09-25, crediti quasi finiti; tutto nel working tree, niente commit)**
-- Scritto (mai eseguito né passato a shellcheck):
-  - `deploy/lib/common.sh` (prompt da /dev/tty, `--non-interactive`, stato in `/etc/floppyoctotouch/install.conf`,
-    blocco display con marcatori, rimozione token da cmdline.txt);
-  - `deploy/install.sh` (controlli OS/arch/OctoPrint, utente da `octoprint.service`, apt cage + chromium|chromium-browser
-    + python3-venv + wlr-randr + fonts-dejavu-core + curl, copia in `/opt/floppyoctotouch`, venv con la wheel dell'agent,
-    API key validata su `/api/version`, `config.json` 600 con chiavi gestite (usb_roots `/media/usb-*`, eject via sudo,
-    kiosk restart, display_output rilevato da /sys/class/drm), unit, PAM, udev, sudoers (visudo), gruppi video/render/input,
-    getty@tty1 disabilitato, blocco config.txt + `video=HDMI-A-1:1024x600@60` con backup, avvio + prompt di riavvio;
-    flag `--non-interactive --api-key= --user= --octoprint-url= --skip-display-config --listen-lan --update`);
-  - `deploy/update.sh` (checksum .sha256, confronto versioni, `--force`, rilancia install.sh `--update`),
-    `deploy/uninstall.sh` (`--purge`, `--keep-display-config`, riabilita getty, toglie il blocco display);
-  - `deploy/systemd/*.service.in`, `deploy/pam/floppyoctotouch-kiosk`, `deploy/udev/99-floppyoctotouch-usb.rules.in`,
-    `deploy/sudoers/floppyoctotouch.in`, `deploy/kiosk/kiosk.sh` (+ `kiosk.env`: profilo Chromium in XDG_RUNTIME_DIR),
-    `deploy/usb/usb-mount.sh` (add/remove da udev con `systemd-mount --no-block`, eject validato);
-  - `scripts/build-release.sh` + `dev/docker/release.Dockerfile` + servizio compose `release`;
-  - agent: nome della chiavetta senza prefisso `usb-` (`usb.py`) + test in `test_usb.py` (non eseguito).
-- **Da fare per provare subito sul Pi**: `docker compose -f dev/docker-compose.yml run --rm release` →
-  copiare `release/floppyoctotouch-0.8.0.tar.gz` (+ `.sha256`) sul Pi, `tar xzf`, `sudo ./floppyoctotouch-0.8.0/deploy/install.sh`.
-  (versione ancora 0.8.0: il bump a 0.9.0 si fa alla chiusura).
-- **Decisione dell'utente**: la repo contiene il pacchetto pronto in `release/` (solo l'ultima versione,
-  `build-release.sh` cancella le precedenti; `.gitignore` le ammette). `sudo ./deploy/install.sh` lanciato da un
-  clone (senza `frontend/dist` né `VERSION`) verifica il `.sha256`, estrae il tarball in una cartella temporanea e
-  lancia l'installer al suo interno con le stesse opzioni. `build-release.sh` verificato: tarball 344 KB
-  (`floppyoctotouch-0.8.0.tar.gz`, build di prova ancora con versione 0.8.0, committato). Alla chiusura: rigenerarlo
-  come 0.9.0 e documentare nel README "git clone + sudo ./deploy/install.sh".
-- **Mancano** (da riprendere): shellcheck + agent-test; servizio compose `deploy-test` (già scritti
-  `dev/docker/deploy-test.Dockerfile`, `dev/deploy-test/run.sh`, `fake_octoprint.py`; aggiungere `dbus` al Dockerfile e
-  il servizio con `../release:/release:ro` e `./deploy-test:/test:ro`) ed eseguirlo; togliere i `.gitkeep` di
-  deploy/ e scripts/; README (installazione + troubleshooting), ARCHITECTURE, CHANGELOG, CLAUDE.md; bump 0.9.0, commit, tag.
-- Punti da verificare sul Pi: cage con PAM/logind su tty1, `WAYLAND_DISPLAY=wayland-0` per wlr-randr, mount udev
-  (BindsTo del mount al dispositivo), nome pacchetto Chromium, `--owner` di systemd-mount.
+**Sessione 9 — Installazione sul Raspberry (2026-09-25, v0.9.0)**
+- Sessione interrotta una volta (crediti) dopo aver scritto tutti gli script (due commit WIP: `80ef7a6`, `f31e310`),
+  ripresa lo stesso giorno per test, correzioni e chiusura.
+- Fatto: `deploy/install.sh` idempotente + `deploy/lib/common.sh` (prompt da `/dev/tty`, stato in
+  `/etc/floppyoctotouch/install.conf`), `deploy/update.sh` (checksum, confronto versioni, `--force`, rilancia
+  `install.sh --update`), `deploy/uninstall.sh` (`--purge`, `--keep-display-config`), unit systemd agent + kiosk
+  (`cage -s` su tty1 con sessione PAM/logind `floppyoctotouch-kiosk`, `Restart=always`, `Conflicts=getty@tty1`),
+  `deploy/kiosk/kiosk.sh` + `kiosk.env`, regola udev + `deploy/usb/usb-mount.sh` (`systemd-mount --no-block` in sola
+  lettura su `/media/usb-<etichetta>`), regola sudoers (solo espulsione e riavvio kiosk), blocco display in
+  `config.txt` + `video=HDMI-A-1:1024x600@60` in `cmdline.txt` con backup; `scripts/build-release.sh` (servizio
+  `release`), servizio `deploy-test`. Flag: `--non-interactive --api-key= --user= --octoprint-url=
+  --skip-display-config --listen-lan` (+ `--update` interno).
+- Test: `deploy-test` in `debian:bookworm` senza systemd PID 1 → **77 controlli verdi** (installazione, config.json
+  600 e chiavi, unit con `systemd-analyze verify`, sudo con `sudo -l`, gruppi, file di boot una sola volta e ripristinati,
+  agent avviato con la config installata e autorizzato sul finto OctoPrint, kiosk.sh con Chromium finto, helper USB con
+  `systemd-mount` finto, seconda installazione, update con tarball danneggiato/stessa versione/`--force`, uninstall,
+  installazione da clone con tarball in `release/` e checksum alterato, `--purge`). shellcheck pulito, 70 pytest,
+  138 vitest. Tarball `release/floppyoctotouch-0.9.0.tar.gz` (348 KB) committato.
+- Decisioni:
+  - **Repo = pacchetto pronto** (decisione dell'utente): `release/` contiene solo l'ultimo tarball + `.sha256`;
+    `git clone` + `sudo ./deploy/install.sh` verifica il checksum ed esegue l'installer del tarball. README con le due
+    strade (clone o tarball copiato) e con update/uninstall/troubleshooting.
+  - Chiavette montate su `/media/usb-<etichetta>` (l'agent mostra solo l'etichetta), `usb_roots` = `/media/usb-*`,
+    espulsione con `sudo -n …/usb-mount.sh eject {path}`; solo FAT32/exFAT/NTFS (`ntfs3`)/ext*; il disco di sistema è
+    ignorato (Pi avviato da SSD USB).
+  - Profilo Chromium nuovo a ogni avvio in `XDG_RUNTIME_DIR` (tmpfs): niente "ripristina sessione", niente scritture
+    sulla SD; le impostazioni della dashboard stanno nell'agent.
+  - `--non-interactive` accetta le impostazioni del display (salvo `--skip-display-config`); gli update non toccano mai
+    il display. I pacchetti installati restano dopo l'uninstall (lo script dice come toglierli).
+  - Architettura diversa da arm64/armhf: solo avviso (serve per il container di test).
+- Deviazioni / scoperte:
+  - shellcheck: con `-x` dalla radice il `source=lib/common.sh` non veniva trovato → `source=SCRIPTDIR/lib/common.sh`.
+  - Il finto OctoPrint non rispondeva su `/robots.txt` (il test aspettava all'infinito un 200): corretto.
+  - Un controllo del test sui gruppi falliva per un glob con spazi sovrapposti (l'installer era giusto).
+- Problemi aperti / da verificare sul Pi (S10): cage con PAM/logind su tty1 (sessione su `seat0`), nome effettivo
+  `wayland-0` per `wlr-randr`, montaggio da udev con `systemd-mount` (e smontaggio all'estrazione, `BindsTo`),
+  `--owner` di systemd-mount su vfat/exfat, nome del pacchetto Chromium su OctoPi 1.1.0, risoluzione con le righe
+  del produttore + `video=`, tempi di avvio, flag GPU di Chromium (`FOT_CHROMIUM_FLAGS` in `kiosk.env`). Il
+  riavvio/spegnimento da Sistema usa i comandi già configurati in OctoPi.
+- Comandi utili: `docker compose -f dev/docker-compose.yml run --rm release` poi `… run --rm deploy-test`;
+  sul Pi: `journalctl -u floppyoctotouch-agent -u floppyoctotouch-kiosk -b`, `journalctl -t floppyoctotouch-usb -b`,
+  `sudo systemctl restart floppyoctotouch-kiosk`.

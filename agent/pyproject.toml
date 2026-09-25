@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "floppyoctotouch-agent"
-version = "0.8.0"
+version = "0.9.0"
 description = "Local companion service for the FloppyOctoTouch dashboard: serves the UI and proxies OctoPrint."
 readme = "README.md"
 license = "MIT"
