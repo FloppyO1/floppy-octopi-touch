@@ -50,6 +50,14 @@ services:
       retries: 30
       start_period: 20s
 
+  # MJPEG test pattern on :8080, like camera-streamer on OctoPi (`docker compose stop webcam` to
+  # test the "no webcam" fallback). The octoprint image is reused because it ships ffmpeg.
+  webcam:
+    image: octoprint/octoprint:${OCTOPRINT_VERSION:-1.11.8}
+    entrypoint: ["python", "/fake-webcam/server.py"]
+    volumes:
+      - ./fake-webcam:/fake-webcam:ro
+
   agent:
     build: *agent-build
     image: floppyoctotouch-agent-dev
@@ -64,6 +72,9 @@ services:
       FOT_DATA_DIR: /data
       FOT_STATIC_DIR: /frontend/dist
       FOT_USB_ROOTS: /media/usb0
+      FOT_WEBCAM_URL: http://webcam:8080
+      # No HDMI output to switch in Docker: /local/display only logs.
+      FOT_DISPLAY_BACKEND: none
     ports:
       - "127.0.0.1:${AGENT_PORT:-8765}:8765"
     volumes:

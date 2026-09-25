@@ -36,6 +36,9 @@ CLIENT_SESSION = web.AppKey("client_session", aiohttp.ClientSession)
 
 
 class OctoPrintProxy:
+    name = "OctoPrint"
+    unreachable = "octoprint_unreachable"
+
     def __init__(self, upstream: str, api_key: str) -> None:
         self.upstream = URL(upstream)
         self.api_key = api_key
@@ -72,15 +75,19 @@ class OctoPrintProxy:
                 if upstream.content_length is not None:
                     response.content_length = upstream.content_length
                 await response.prepare(request)
-                async for chunk in upstream.content.iter_chunked(64 * 1024):
-                    await response.write(chunk)
-                await response.write_eof()
+                try:
+                    async for chunk in upstream.content.iter_chunked(64 * 1024):
+                        await response.write(chunk)
+                    await response.write_eof()
+                except ConnectionResetError:
+                    # The browser went away (e.g. an endless MJPEG stream was closed).
+                    pass
                 return response
         except aiohttp.ClientConnectionError as exc:
-            log.warning("OctoPrint unreachable for %s %s: %s", request.method, request.path, exc)
-            return web.json_response(
-                {"error": "octoprint_unreachable", "detail": str(exc)}, status=502
+            log.warning(
+                "%s unreachable for %s %s: %s", self.name, request.method, request.path, exc
             )
+            return web.json_response({"error": self.unreachable, "detail": str(exc)}, status=502)
 
     async def _handle_websocket(self, request: web.Request) -> web.StreamResponse:
         session = request.app[CLIENT_SESSION]
@@ -127,3 +134,30 @@ class OctoPrintProxy:
         for prefix in PROXIED_PREFIXES:
             app.router.add_route("*", prefix, self.handle)
             app.router.add_route("*", prefix + "/{tail:.*}", self.handle)
+
+
+class WebcamProxy(OctoPrintProxy):
+    """``/webcam/<path>`` → ``<webcam_url>/<path>``, as OctoPi's haproxy does for camera-streamer.
+
+    OctoPrint's default stream URL is the relative ``/webcam/?action=stream``, so the kiosk gets the
+    stream through the agent without knowing where the streamer listens. No API key is added.
+    """
+
+    name = "Webcam"
+    unreachable = "webcam_unreachable"
+
+    def __init__(self, upstream: str) -> None:
+        super().__init__(upstream, "")
+
+    def target(self, request: web.Request) -> URL:
+        rest = request.raw_path.removeprefix("/webcam").lstrip("/")
+        return self.upstream.join(URL("/" + rest, encoded=True))
+
+    async def handle(self, request: web.Request) -> web.StreamResponse:
+        if request.method not in ("GET", "HEAD"):
+            raise web.HTTPMethodNotAllowed(request.method, ["GET", "HEAD"])
+        return await self._handle_http(request)
+
+    def add_routes(self, app: web.Application) -> None:
+        app.router.add_route("*", "/webcam", self.handle)
+        app.router.add_route("*", "/webcam/{tail:.*}", self.handle)

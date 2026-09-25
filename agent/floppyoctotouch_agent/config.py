@@ -19,9 +19,15 @@ class Config:
     static_dir: Path = Path("/opt/floppyoctotouch/frontend")
     data_dir: Path = Path("~/.config/floppyoctotouch")
     usb_roots: list[Path] = field(default_factory=lambda: [Path("/media")])
+    # camera-streamer on OctoPi; `/webcam/*` is proxied here with the prefix removed (like haproxy).
+    webcam_url: str = "http://127.0.0.1:8080"
+    # "wlr-randr" (HDMI output of the cage session) or "none" (only logs, for development).
+    display_backend: str = "wlr-randr"
+    display_output: str = "HDMI-A-1"
 
     def __post_init__(self) -> None:
         self.octoprint_url = self.octoprint_url.rstrip("/")
+        self.webcam_url = self.webcam_url.rstrip("/")
         self.static_dir = Path(self.static_dir).expanduser()
         self.data_dir = Path(self.data_dir).expanduser()
         self.usb_roots = [Path(p).expanduser() for p in self.usb_roots]
@@ -35,6 +41,9 @@ _ENV = {
     "FOT_STATIC_DIR": "static_dir",
     "FOT_DATA_DIR": "data_dir",
     "FOT_USB_ROOTS": "usb_roots",
+    "FOT_WEBCAM_URL": "webcam_url",
+    "FOT_DISPLAY_BACKEND": "display_backend",
+    "FOT_DISPLAY_OUTPUT": "display_output",
 }
 
 

@@ -11,13 +11,15 @@ from aiohttp import web
 
 from . import __version__
 from .config import Config
-from .proxy import CLIENT_SESSION, OctoPrintProxy
+from .display import Display, DisplayError
+from .proxy import CLIENT_SESSION, OctoPrintProxy, WebcamProxy
 from .settings import SettingsStore
 
 log = logging.getLogger(__name__)
 
 CONFIG = web.AppKey("config", Config)
 SETTINGS = web.AppKey("settings", SettingsStore)
+DISPLAY = web.AppKey("display", Display)
 
 
 async def _client_session(app: web.Application) -> AsyncIterator[None]:
@@ -74,6 +76,27 @@ async def put_settings(request: web.Request) -> web.Response:
     return web.json_response(data)
 
 
+async def get_display(request: web.Request) -> web.Response:
+    return web.json_response(request.app[DISPLAY].state())
+
+
+async def put_display(request: web.Request) -> web.Response:
+    """``{"on": false}`` turns the HDMI output off, ``{"on": true}`` back on."""
+    try:
+        data = await request.json()
+    except ValueError:
+        raise web.HTTPBadRequest(text="invalid JSON") from None
+    if not isinstance(data, dict) or not isinstance(data.get("on"), bool):
+        raise web.HTTPBadRequest(text='expected {"on": true|false}')
+    display = request.app[DISPLAY]
+    try:
+        await display.set_power(data["on"])
+    except DisplayError as exc:
+        log.warning("display: %s", exc)
+        return web.json_response({"error": "display_failed", "detail": str(exc)}, status=503)
+    return web.json_response(display.state())
+
+
 def _static_handler(static_dir: Path):
     root = static_dir.resolve()
 
@@ -98,13 +121,17 @@ def create_app(config: Config) -> web.Application:
     app = web.Application(client_max_size=1024**3)
     app[CONFIG] = config
     app[SETTINGS] = SettingsStore(config.data_dir / "settings.json")
+    app[DISPLAY] = Display(config.display_backend, config.display_output)
     app.cleanup_ctx.append(_client_session)
 
     app.router.add_get("/local/health", health)
     app.router.add_get("/local/settings", get_settings)
     app.router.add_put("/local/settings", put_settings)
+    app.router.add_get("/local/display", get_display)
+    app.router.add_put("/local/display", put_display)
 
     OctoPrintProxy(config.octoprint_url, config.api_key).add_routes(app)
+    WebcamProxy(config.webcam_url).add_routes(app)
 
     static = _static_handler(config.static_dir)
     app.router.add_get("/{tail:.*}", static)
