@@ -1,13 +1,13 @@
 <script lang="ts">
-  // Temporary page (session 2): shows every store to verify the data layer against OctoPrint.
-  // Replaced by the real shell and screens from session 3 on.
+  // Dev-only page (/debug, from session 2): shows every store to verify the data layer against
+  // OctoPrint. Not part of the production build.
   import { onDestroy } from 'svelte';
-  import { printer as printerApi } from '../lib/api/octoprint';
-  import { CAPABILITY_KEYS, type CapabilityOverride } from '../lib/core/capabilities';
-  import { formatBytes, formatClock, formatDuration, formatTemp } from '../lib/core/format';
-  import { PLUGIN_IDS, type PluginKey } from '../lib/core/printerState';
-  import { LANGUAGES } from '../lib/core/settings';
-  import { i18n, t } from '../lib/i18n/index.svelte';
+  import { printer as printerApi } from '../../lib/api/octoprint';
+  import { CAPABILITY_KEYS, type CapabilityOverride } from '../../lib/core/capabilities';
+  import { formatBytes, formatClock, formatDuration, formatTemp } from '../../lib/core/format';
+  import { PLUGIN_IDS, type PluginKey } from '../../lib/core/printerState';
+  import { LANGUAGES } from '../../lib/core/settings';
+  import { i18n, t } from '../../lib/i18n/index.svelte';
   import {
     capabilities,
     connection,
@@ -20,7 +20,7 @@
     settings,
     temperatures,
     terminal,
-  } from '../lib/stores';
+  } from '../../lib/stores';
 
   let now = $state(new Date());
   const tick = setInterval(() => (now = new Date()), 1000);

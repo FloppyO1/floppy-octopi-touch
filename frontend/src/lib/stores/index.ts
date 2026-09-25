@@ -1,8 +1,10 @@
 export { capabilities } from './capabilities.svelte';
+export { clock } from './clock.svelte';
 export { connection } from './connection.svelte';
 export { startDataLayer, stopDataLayer } from './dataLayer';
 export { events } from './events.svelte';
 export { files } from './files.svelte';
+export { nav } from './nav.svelte';
 export { job, printer } from './printer.svelte';
 export { prompt } from './prompt.svelte';
 export { server } from './server.svelte';

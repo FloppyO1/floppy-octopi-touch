@@ -71,6 +71,12 @@ class PromptStore {
     await printerApi.command(`M876 S${choice}`);
   }
 
+  /** Hides the prompt without answering (only offered when the firmware sent no choices). */
+  dismiss(): void {
+    this.active = null;
+    this.parser.prompt = null;
+  }
+
   dismissNotification(id: number): void {
     this.notifications = this.notifications.filter((n) => n.id !== id);
   }

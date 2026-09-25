@@ -1,4 +1,5 @@
 import type { OctoPrintSettings, PrinterState } from '../api/types';
+import type { GaugeTone } from './gauge';
 
 /** One word for the printer state, derived from OctoPrint's flags (the text is localised by OctoPrint). */
 export type PrinterPhase =
@@ -60,4 +61,24 @@ export function detectPlugins(settings: OctoPrintSettings | null): Record<Plugin
   return Object.fromEntries(
     Object.entries(PLUGIN_IDS).map(([key, id]) => [key, present.has(id)]),
   ) as Record<PluginKey, boolean>;
+}
+
+/** Colour of a printer phase (status bar, overlays, Home). */
+export function phaseTone(phase: PrinterPhase): GaugeTone {
+  switch (phase) {
+    case 'printing':
+    case 'finishing':
+      return 'accent';
+    case 'pausing':
+    case 'paused':
+    case 'resuming':
+    case 'cancelling':
+      return 'paused';
+    case 'error':
+      return 'error';
+    case 'operational':
+      return 'ok';
+    default:
+      return 'neutral';
+  }
 }

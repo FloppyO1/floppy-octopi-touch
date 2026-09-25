@@ -1,0 +1,134 @@
+/*
+ * Design tokens (dark theme only). Components read these custom properties, never raw colours.
+ * The accent is switched with `data-accent` on <html> (see theme.ts).
+ */
+
+/* Inter (variable, bundled: the kiosk must work offline). Only Latin subsets are shipped. */
+@font-face {
+  font-family: 'Inter Variable';
+  font-style: normal;
+  font-display: block;
+  font-weight: 100 900;
+  src: url('@fontsource-variable/inter/files/inter-latin-wght-normal.woff2') format('woff2-variations');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304,
+    U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'Inter Variable';
+  font-style: normal;
+  font-display: block;
+  font-weight: 100 900;
+  src: url('@fontsource-variable/inter/files/inter-latin-ext-wght-normal.woff2') format('woff2-variations');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308,
+    U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113,
+    U+2C60-2C7F, U+A720-A7FF;
+}
+
+:root {
+  color-scheme: dark;
+
+  /* ---- surfaces and text */
+  --bg: #0c0e12;
+  --surface: #151920;
+  --surface-2: #1d222b;
+  --surface-3: #282e39;
+  --border: #2c3340;
+  --text: #eef1f5;
+  --text-dim: #a2abb9;
+  --text-faint: #697385;
+  --backdrop: rgb(4 6 9 / 0.72);
+
+  /* ---- states (printer phase, heaters, results) */
+  --ok: #3fcf8e;
+  --heating: #ff8a3d;
+  --cooling: #5aa9ff;
+  --paused: #f5c542;
+  --error: #ff5c6c;
+  --idle: #8fa3bf;
+  --offline: #697385;
+  --ok-soft: rgb(63 207 142 / 0.16);
+  --heating-soft: rgb(255 138 61 / 0.16);
+  --paused-soft: rgb(245 197 66 / 0.16);
+  --error-soft: rgb(255 92 108 / 0.16);
+
+  /* ---- accent (default: teal; overridden below) */
+  --accent: #2dd4bf;
+  --accent-strong: #5eead4;
+  --accent-soft: rgb(45 212 191 / 0.16);
+  --on-accent: #032320;
+  --printing: var(--accent);
+
+  /* ---- typography: readable at 50-80 cm on a 7" 1024x600 panel */
+  --font: 'Inter Variable', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: ui-monospace, 'DejaVu Sans Mono', 'Cascadia Mono', Consolas, monospace;
+  --fs-xs: 13px;
+  --fs-sm: 15px;
+  --fs-md: 17px;
+  --fs-lg: 20px;
+  --fs-xl: 24px;
+  --fs-2xl: 32px;
+  --fs-3xl: 44px;
+  --fs-display: 64px;
+  --fw-regular: 450;
+  --fw-medium: 550;
+  --fw-bold: 700;
+
+  /* ---- spacing, radii, shadows */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 24px;
+  --sp-6: 32px;
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 16px;
+  --r-xl: 22px;
+  --r-pill: 999px;
+  --shadow-1: 0 1px 2px rgb(0 0 0 / 0.4), 0 2px 8px rgb(0 0 0 / 0.25);
+  --shadow-2: 0 12px 40px rgb(0 0 0 / 0.55), 0 2px 8px rgb(0 0 0 / 0.4);
+
+  /* ---- touch and layout */
+  --touch: 56px;
+  --touch-lg: 64px;
+  --sidebar-w: 88px;
+  --statusbar-h: 48px;
+
+  /* ---- motion */
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --dur-fast: 100ms;
+  --dur: 180ms;
+
+  /* ---- layers */
+  --z-overlay: 100;
+  --z-modal: 200;
+  --z-keyboard: 300;
+  --z-toast: 400;
+  --z-blocking: 500;
+  --z-connection: 600;
+}
+
+:root[data-accent='amber'] {
+  --accent: #ffb020;
+  --accent-strong: #ffc555;
+  --accent-soft: rgb(255 176 32 / 0.16);
+  --on-accent: #241600;
+  /* Heating would be too close to the accent: shift it towards red. */
+  --heating: #ff6a3d;
+  --heating-soft: rgb(255 106 61 / 0.16);
+}
+
+:root[data-accent='teal'] {
+  --accent: #2dd4bf;
+  --accent-strong: #5eead4;
+  --accent-soft: rgb(45 212 191 / 0.16);
+  --on-accent: #032320;
+}
+
+:root[data-accent='indigo'] {
+  --accent: #818cf8;
+  --accent-strong: #a5b4fc;
+  --accent-soft: rgb(129 140 248 / 0.18);
+  --on-accent: #0b0d2e;
+}

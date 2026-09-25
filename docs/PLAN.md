@@ -438,7 +438,7 @@ _Legenda: `[ ]` da fare · `[~]` in corso (interrotta se la trovi a inizio sessi
 - [x] Sessione 0 — Raccolta requisiti e piano (2026-09-25), integrazione requisiti mancanti (2026-09-25)
 - [x] Sessione 1 — Fondamenta, repo e ambiente Docker (2026-09-25, v0.1.0)
 - [x] Sessione 2 — Data layer (2026-09-25, v0.2.0)
-- [ ] Sessione 3 — Design system e shell
+- [~] Sessione 3 — Design system e shell (iniziata 2026-09-25)
 - [ ] Sessione 4 — Home, controllo stampa, screensaver, notifiche
 - [ ] Sessione 5 — File
 - [ ] Sessione 6 — Temperature, Movimento, Filamento
@@ -542,6 +542,13 @@ _(ogni sessione aggiunge qui decisioni prese, deviazioni dal piano, problemi ape
   - Il servizio webcam, PSU Control e azioni personalizzate non sono nello schema impostazioni: aggiungerli con
     una migrazione v3 quando servono (S4/S8).
   - `printer.currentZ` resta `null` con la Virtual Printer (non invia la Z durante il file di prova).
-- Comandi utili: `docker compose -f dev/docker-compose.yml run --rm octoprint-init` (riapplica campioni/SD senza
+- Comandi utili (S2): `docker compose -f dev/docker-compose.yml run --rm octoprint-init` (riapplica campioni/SD senza
   `down -v`); smoke test sulla build dell'agent:
   `MSYS_NO_PATHCONV=1 docker compose -f dev/docker-compose.yml run --rm -e BASE_URL=http://agent:8765 -e SCREENSHOT_DIR=/tmp playwright`.
+
+**Sessione 3 — in corso (2026-09-25)**
+- Stop intermedio raggiunto: token, componenti, shell, bozza Home, gallery `/ui-gallery` e pagina `/debug` (solo dev)
+  fatti; screenshot `dev/screenshots/accent-{amber,teal,indigo}-{home,numpad,gallery}.png` (script `dev/e2e/accents.mjs`).
+  Accento provvisorio `teal` (`DEFAULT_ACCENT` in `lib/ui/theme.ts`), in attesa della scelta dell'utente.
+- Da fare dopo la scelta: fissare l'accento, rifinire, aggiornare lo smoke test (`screenshot.mjs`) alla shell,
+  chiusura sessione (v0.3.0).
