@@ -62,7 +62,8 @@ find "$dir" -type f -exec chmod 644 {} +
 find "$dir/deploy" -name '*.sh' -exec chmod 755 {} +
 
 mkdir -p "$OUT"
-rm -f "$OUT/$name.tar.gz" "$OUT/$name.tar.gz.sha256"
+# Only the latest release is kept (release/ is committed, so a clone is ready to install).
+rm -f "$OUT"/floppyoctotouch-*.tar.gz "$OUT"/floppyoctotouch-*.tar.gz.sha256
 tar --sort=name --owner=0 --group=0 --numeric-owner --mtime="@${SOURCE_DATE_EPOCH:-$(date +%s)}" \
   -C "$stage" -cf - "$name" | gzip -n -9 >"$OUT/$name.tar.gz"
 (cd "$OUT" && sha256sum "$name.tar.gz" >"$name.tar.gz.sha256")

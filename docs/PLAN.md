@@ -920,6 +920,12 @@ _(ogni sessione aggiunge qui decisioni prese, deviazioni dal piano, problemi ape
 - **Da fare per provare subito sul Pi**: `docker compose -f dev/docker-compose.yml run --rm release` →
   copiare `release/floppyoctotouch-0.8.0.tar.gz` (+ `.sha256`) sul Pi, `tar xzf`, `sudo ./floppyoctotouch-0.8.0/deploy/install.sh`.
   (versione ancora 0.8.0: il bump a 0.9.0 si fa alla chiusura).
+- **Decisione dell'utente**: la repo contiene il pacchetto pronto in `release/` (solo l'ultima versione,
+  `build-release.sh` cancella le precedenti; `.gitignore` le ammette). `sudo ./deploy/install.sh` lanciato da un
+  clone (senza `frontend/dist` né `VERSION`) verifica il `.sha256`, estrae il tarball in una cartella temporanea e
+  lancia l'installer al suo interno con le stesse opzioni. `build-release.sh` verificato: tarball 344 KB
+  (`floppyoctotouch-0.8.0.tar.gz`, build di prova ancora con versione 0.8.0, committato). Alla chiusura: rigenerarlo
+  come 0.9.0 e documentare nel README "git clone + sudo ./deploy/install.sh".
 - **Mancano** (da riprendere): shellcheck + agent-test; servizio compose `deploy-test` (già scritti
   `dev/docker/deploy-test.Dockerfile`, `dev/deploy-test/run.sh`, `fake_octoprint.py`; aggiungere `dbus` al Dockerfile e
   il servizio con `../release:/release:ro` e `./deploy-test:/test:ro`) ed eseguirlo; togliere i `.gitkeep` di

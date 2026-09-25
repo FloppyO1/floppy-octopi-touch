@@ -667,10 +667,35 @@ summary() {
   info "uninstall:      sudo floppyoctotouch-uninstall"
 }
 
+# Run from a git clone: the web app is not built there, but release/ holds the latest release tarball.
+# Verify it, extract it to a temporary folder and run the installer inside it with the same options.
+run_bundled_release() {
+  local tarball='' candidate tmp status=0
+  [ ! -f "$SRC_DIR/VERSION" ] && [ ! -f "$SRC_DIR/frontend/dist/index.html" ] || return 0
+  for candidate in "$SRC_DIR"/release/floppyoctotouch-*.tar.gz; do
+    [ -f "$candidate" ] && tarball=$candidate
+  done
+  [ -n "$tarball" ] || return 0
+  step "Using the bundled release $(basename "$tarball")"
+  if [ -f "$tarball.sha256" ]; then
+    (cd "$(dirname "$tarball")" && sha256sum --check --status "$(basename "$tarball").sha256") ||
+      die "checksum mismatch: $tarball is damaged (git pull again)"
+    ok "checksum verified"
+  else
+    warn "no checksum file next to $tarball: not verified"
+  fi
+  tmp=$(mktemp -d)
+  tar -xzf "$tarball" -C "$tmp"
+  bash "$tmp/$(basename "$tarball" .tar.gz)/deploy/install.sh" "$@" || status=$?
+  rm -rf -- "$tmp"
+  exit "$status"
+}
+
 main() {
   parse_args "$@"
   require_root "$@"
   require_tty
+  run_bundled_release "$@"
   load_state
   CMDLINE_TOKEN_ADDED=${FOT_CMDLINE_TOKEN:-}
   [ "$UPDATE" = 1 ] && [ "${FOT_LISTEN_LAN:-0}" = 1 ] && LISTEN_LAN=1

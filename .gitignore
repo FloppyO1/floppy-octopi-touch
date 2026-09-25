@@ -30,10 +30,11 @@ dev/fake-usb/**
 !dev/fake-usb/.gitkeep
 !dev/fake-usb/README.md
 
-# Release artifacts
-release/
+# Release artifacts: only the latest release in release/ is committed (ready for "git clone" + install.sh)
 *.tar.gz
 *.sha256
+!release/floppyoctotouch-*.tar.gz
+!release/floppyoctotouch-*.tar.gz.sha256
 
 # Editors / OS
 .vscode/
