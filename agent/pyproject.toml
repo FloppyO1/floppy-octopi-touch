@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "floppyoctotouch-agent"
+version = "0.1.0"
+description = "Local companion service for the FloppyOctoTouch dashboard: serves the UI and proxies OctoPrint."
+readme = "README.md"
+license = "MIT"
+authors = [{ name = "Filippo Castellan" }]
+requires-python = ">=3.11"
+dependencies = [
+  "aiohttp>=3.9,<4",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8",
+  "pytest-aiohttp>=1.0",
+  "ruff>=0.6",
+  "watchfiles>=0.21",
+]
+
+[project.scripts]
+floppyoctotouch-agent = "floppyoctotouch_agent.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["floppyoctotouch_agent*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "ASYNC"]
