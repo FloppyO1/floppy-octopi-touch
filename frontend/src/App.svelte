@@ -7,9 +7,11 @@
   import { toast } from './lib/ui/toast.svelte';
   import ToastHost from './lib/ui/ToastHost.svelte';
   import ConnectionOverlay from './shell/ConnectionOverlay.svelte';
+  import NoticeDialog from './shell/NoticeDialog.svelte';
+  import Screensaver from './shell/Screensaver.svelte';
   import Shell from './shell/Shell.svelte';
 
-  const { prompt } = stores;
+  const { notices, prompt } = stores;
 
   // Dev-only pages; the dynamic imports are dropped from the production build.
   const DEV_PAGES: Record<string, () => Promise<{ default: Component }>> = import.meta.env.DEV
@@ -32,6 +34,7 @@
   onMount(() => {
     stores.startDataLayer();
     stores.clock.start();
+    if (!isDevPage) stores.idle.start();
     offNotification = stores.events.on('host:notification', (event) => {
       const message = String(event.payload?.message ?? '');
       if (message) toast.show(t('prompt.notification', { message }));
@@ -39,6 +42,7 @@
   });
   onDestroy(() => {
     offNotification?.();
+    stores.idle.stop();
     stores.clock.stop();
     stores.stopDataLayer();
   });
@@ -48,12 +52,18 @@
   {#if DevPage}<DevPage />{/if}
 {:else}
   <Shell />
-  <ConnectionOverlay />
+  {#if notices.current}
+    {#key notices.current}
+      <NoticeDialog notice={notices.current} />
+    {/key}
+  {/if}
   {#if prompt.enabled && prompt.active}
     {#key prompt.active}
       <PromptDialog prompt={prompt.active} onanswer={(choice) => prompt.answer(choice)} ondismiss={() => prompt.dismiss()} />
     {/key}
   {/if}
+  <Screensaver />
+  <ConnectionOverlay />
 {/if}
 <DialogHost />
 <ToastHost />

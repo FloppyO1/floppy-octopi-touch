@@ -13,12 +13,14 @@ import { capabilities } from './capabilities.svelte';
 import { connection } from './connection.svelte';
 import { events } from './events.svelte';
 import { files } from './files.svelte';
+import { notices } from './notices.svelte';
 import { job, printer } from './printer.svelte';
 import { prompt } from './prompt.svelte';
 import { server } from './server.svelte';
 import { settings } from './settings.svelte';
 import { temperatures } from './temperatures.svelte';
 import { terminal } from './terminal.svelte';
+import { tune } from './tune.svelte';
 
 const HEALTH_RETRY_MS = 5000;
 
@@ -36,12 +38,14 @@ function handleEvent({ type, payload }: EventPayload): void {
   switch (type) {
     case 'Connected':
       capabilities.expectReport();
+      tune.reset();
       void connection.refresh();
       void server.loadProfile();
       break;
     case 'Disconnected':
       capabilities.reset();
       prompt.reset();
+      tune.reset();
       void connection.refresh();
       break;
     case 'FirmwareData':
@@ -54,6 +58,7 @@ function handleEvent({ type, payload }: EventPayload): void {
       void server.loadProfile();
       break;
   }
+  notices.handleEvent(type, payload);
   events.emit(type, payload);
 }
 
@@ -69,6 +74,8 @@ function handleCurrent(current: CurrentPayload, isHistory: boolean): void {
     // Old lines from `history` must not re-open prompts that were already answered.
     prompt.ingest(current.logs);
   }
+  // History lines are the recent past: good enough to know the fan/feed rate/flow after a reload.
+  tune.ingest(current.logs);
   capabilities.ingest(current.logs);
   if (printer.operational && !capabilities.known) void capabilities.requestIfUnknown();
 }
@@ -104,6 +111,7 @@ async function loadInitialState(): Promise<void> {
     files.refresh(),
     files.refreshUsb(),
   ]);
+  await server.loadLayerValues();
 }
 
 let socket: OctoPrintSocket | null = null;

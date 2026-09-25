@@ -2,7 +2,7 @@
 import { getUsbFiles } from '../api/agent';
 import { HttpError } from '../api/http';
 import { files as filesApi, printer as printerApi } from '../api/octoprint';
-import type { FileEntry, UsbFile } from '../api/types';
+import type { FileEntry, FileOrigin, UsbFile } from '../api/types';
 import { splitByOrigin } from '../core/files';
 
 export type LoadStatus = 'idle' | 'loading' | 'ready' | 'error';
@@ -59,6 +59,9 @@ class FilesStore {
    * Asks the printer to re-read its SD card (M20); OctoPrint then fires UpdatedFiles.
    * Never while printing: the serial line is busy and SD listing can stall the printer.
    */
+  /** Selects a file and starts printing it (callers confirm first: the bed must be clear). */
+  print = (origin: FileOrigin, path: string) => filesApi.select(origin, path, true);
+
   refreshSd = () => printerApi.sd.refresh();
   initSd = () => printerApi.sd.init();
   releaseSd = () => printerApi.sd.release();

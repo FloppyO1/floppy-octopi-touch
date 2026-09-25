@@ -79,6 +79,13 @@
     });
     if (value !== null) target = value;
   }
+
+  let fanPercent = $state(50);
+  async function trySlider() {
+    const value = await dialogs.slider({ title: t('tune.fan'), value: fanPercent, min: 0, max: 100, fineStep: 5, unit: '%' });
+    if (value !== null) fanPercent = value;
+  }
+
   async function tryConfirm() {
     const ok = await dialogs.confirm({
       title: t('job.stopTitle'),
@@ -188,6 +195,7 @@
         <Button onclick={() => (modalOpen = true)} data-testid="open-modal">Modal</Button>
         <Button onclick={tryConfirm} data-testid="open-confirm">ConfirmDialog</Button>
         <Button onclick={tryNumber} data-testid="open-numpad">NumPad</Button>
+        <Button onclick={trySlider} data-testid="open-slider">SliderDialog {fanPercent}%</Button>
         <Button onclick={() => (promptOpen = true)} data-testid="open-prompt">PromptDialog</Button>
         <Button onclick={() => toast.show(t('gallery.toast'), { tone: 'ok' })} data-testid="open-toast">Toast</Button>
         <Button onclick={() => toast.show(t('temps.setFailed'), { tone: 'error' })}>Toast error</Button>

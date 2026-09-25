@@ -60,6 +60,30 @@ export function findFile(entries: readonly FileEntry[], path: string): FileEntry
   return flattenFiles(entries).find((e) => e.path === path) ?? null;
 }
 
+/** When a file was last printed, or else uploaded (seconds since the epoch). */
+function lastUsed(entry: FileEntry): number {
+  return Math.max(entry.prints?.last?.date ?? 0, entry.date ?? 0);
+}
+
+/** Most recently printed or uploaded files, newest first. */
+export function recentFiles(entries: readonly FileEntry[], limit = 3): FileEntry[] {
+  return flattenFiles(entries)
+    .filter((e) => e.type === 'machinecode')
+    .sort((a, b) => lastUsed(b) - lastUsed(a))
+    .slice(0, limit);
+}
+
+/**
+ * Thumbnail URL of a file. The Slicer Thumbnails plugin adds a relative `thumbnail` field
+ * (`plugin/prusaslicerthumbnails/thumbnail/…png?…`), served through the agent proxy.
+ * Session 5 adds the agent's own extraction for files without it.
+ */
+export function thumbnailUrl(entry: Pick<FileEntry, 'thumbnail'> | null | undefined): string | null {
+  const thumb = entry?.thumbnail;
+  if (!thumb || /^[a-z]+:/i.test(thumb)) return null;
+  return `/${thumb.replace(/^\/+/, '')}`;
+}
+
 /** Parent folder of a storage path (`a/b/c.gcode` → `a/b`, `c.gcode` → ''). */
 export function parentPath(path: string): string {
   const index = path.lastIndexOf('/');

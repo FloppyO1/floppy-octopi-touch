@@ -4,11 +4,12 @@
  *   if (await dialogs.confirm({ title, message, tone: 'danger' })) …
  *   const target = await dialogs.number({ title, value, min, max, unit: '°C' });   // null = cancelled
  *   const name = await dialogs.text({ title, value });                            // null = cancelled
+ *   const fan = await dialogs.slider({ title, value, min: 0, max: 100, unit: '%' }); // null = cancelled
  *
  * Requests stack: a dialog opened from another one is shown on top of it.
  */
 import type { KeyboardLayer } from '../core/keyboard';
-import type { Option } from './types';
+import type { IconComponent, Option } from './types';
 
 export interface ConfirmRequest {
   title: string;
@@ -37,9 +38,22 @@ export interface TextRequest {
   placeholder?: string;
 }
 
+export interface SliderRequest {
+  title: string;
+  icon?: IconComponent;
+  value?: number | null;
+  min?: number;
+  max?: number;
+  step?: number;
+  fineStep?: number;
+  unit?: string;
+  presets?: Option<number>[];
+}
+
 export type ActiveDialog =
   | { id: number; kind: 'confirm'; request: ConfirmRequest; resolve: (ok: boolean) => void }
   | { id: number; kind: 'number'; request: NumberRequest; resolve: (value: number | null) => void }
+  | { id: number; kind: 'slider'; request: SliderRequest; resolve: (value: number | null) => void }
   | { id: number; kind: 'text'; request: TextRequest; resolve: (value: string | null) => void };
 
 type Kind = ActiveDialog['kind'];
@@ -52,6 +66,7 @@ class DialogService {
 
   confirm = (request: ConfirmRequest) => this.open('confirm', request);
   number = (request: NumberRequest) => this.open('number', request);
+  slider = (request: SliderRequest) => this.open('slider', request);
   text = (request: TextRequest) => this.open('text', request);
 
   /** Closes the dialog `id` with `result` (called by DialogHost). */

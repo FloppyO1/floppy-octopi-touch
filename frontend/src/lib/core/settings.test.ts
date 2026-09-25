@@ -61,6 +61,15 @@ describe('migrateSettings', () => {
     expect(settings.capabilities.overrides.autolevel).toBe('on');
   });
 
+  it('migrates v2 documents to v3 with the webcam and Home preview defaults', () => {
+    const { settings, changed } = migrateSettings({ schemaVersion: 2, language: 'it', home: { preview: 'map' } });
+    expect(changed).toBe(true);
+    expect(settings.schemaVersion).toBe(3);
+    expect(settings.language).toBe('it');
+    expect(settings.webcam).toEqual({ url: '' });
+    expect(settings.home).toEqual({ preview: 'thumbnail' });
+  });
+
   it('keeps documents from a newer release without downgrading them', () => {
     const { settings } = migrateSettings({ schemaVersion: 99, language: 'it', futureField: 1 });
     expect(settings.schemaVersion).toBe(99);

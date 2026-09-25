@@ -145,6 +145,162 @@ async function hostPrompt(page) {
   await page.evaluate(() => window.__fot.settings.update((s) => (s.capabilities.overrides.promptSupport = 'auto')));
 }
 
+// A short job (~25 s on the Virtual Printer, thanks to G4 dwells) uploaded by the test itself.
+const SMOKE_FILE = 'smoke-test.gcode';
+const SMOKE_GCODE = [
+  '; FloppyOctoTouch smoke test',
+  'G28',
+  'G90',
+  ...Array.from({ length: 12 }, (_, i) => [`G1 X${20 + i * 5} Y20 F3000`, 'G4 S2']).flat(),
+  'M107',
+].join('\n');
+
+const terminalHas = (page, text, timeout = 15_000) =>
+  page.waitForFunction((t) => window.__fot.terminal.lines.some((l) => l.text.includes(t)), text, { timeout });
+
+// Taps a preset of the open slider dialog and waits until it is gone (outro included).
+async function sliderPreset(page, label) {
+  await page.getByTestId('slider-dialog').getByRole('button', { name: label, exact: true }).click();
+  await page.waitForSelector('[data-testid=slider-dialog]', { state: 'detached' });
+}
+
+async function uploadSmokeFile(page) {
+  const status = await page.evaluate(
+    async ([name, content]) => {
+      const form = new FormData();
+      form.append('file', new Blob([content], { type: 'text/plain' }), name);
+      return (await fetch('/api/files/local', { method: 'POST', body: form })).status;
+    },
+    [SMOKE_FILE, SMOKE_GCODE],
+  );
+  if (status !== 201) throw new Error(`upload failed: HTTP ${status}`);
+}
+
+// Idle Home → print from the recent files → live overrides → pause/resume → webcam → print done notice.
+async function printFlow(page) {
+  await page.goto(`${BASE_URL}/#/home`);
+  await page.waitForSelector('[data-testid=connection-overlay]', { state: 'detached', timeout: 60_000 });
+  await waitText(page, 'status-phase', (t) => t.includes('Ready'));
+  await uploadSmokeFile(page);
+  const printButton = page.getByTestId(`print-${SMOKE_FILE}`);
+  await printButton.waitFor({ timeout: 15_000 });
+  await page.waitForTimeout(700);
+  await page.screenshot({ path: `${OUT}/home-idle.png` });
+
+  await printButton.click();
+  await page.waitForSelector('[data-testid=confirm-dialog]');
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: `${OUT}/confirm-print.png` });
+  await page.getByTestId('confirm-dialog').getByRole('button', { name: 'Print', exact: true }).click();
+  await page.waitForSelector('.home[data-view=job]', { timeout: 15_000 });
+  await page.waitForTimeout(1200);
+  await page.screenshot({ path: `${OUT}/home-printing.png` });
+  log('print', 'started from the recent files after confirmation');
+
+  // Fan through the slider dialog (preset = immediate), then the feed rate.
+  await page.getByTestId('gauge-fan').click();
+  await page.waitForSelector('[data-testid=slider-dialog]');
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: `${OUT}/slider-fan.png` });
+  await sliderPreset(page, '50%');
+  await waitText(page, 'gauge-fan', (t) => t.includes('50'));
+  await page.getByTestId('tune-feedrate').click();
+  await sliderPreset(page, '110%');
+  await waitText(page, 'tune-feedrate', (t) => t.includes('110%'));
+  if (DEV) {
+    await terminalHas(page, 'M106 S128');
+    await terminalHas(page, 'M220 S110');
+  }
+  await page.getByTestId('tune-feedrate').click();
+  await sliderPreset(page, '100%');
+  log('overrides', 'fan 50% (M106 S128), speed 110% (M220 S110)');
+
+  // Pause from here: confirmed, and not announced again by a notice.
+  await page.getByTestId('job-pause').click();
+  await page.getByTestId('confirm-dialog').getByRole('button', { name: 'Pause', exact: true }).click();
+  await page.getByTestId('job-resume').waitFor({ timeout: 15_000 });
+  await page.waitForFunction(() => !document.querySelector('[data-testid=job-resume]')?.disabled, null, {
+    timeout: 15_000,
+  });
+  await page.waitForTimeout(1500);
+  if (await page.getByTestId('notice').count()) throw new Error('local pause was announced');
+  await page.getByTestId('job-resume').click();
+  await page.getByTestId('job-pause').waitFor({ timeout: 15_000 });
+  log('pause/resume', 'confirmed pause, no notice, resumed');
+
+  // The choice is persisted: switch only if the thumbnail is shown.
+  if ((await page.getAttribute('[data-testid=preview]', 'data-mode')) !== 'webcam') {
+    await page.getByTestId('preview-toggle').click();
+  }
+  await page.waitForSelector('[data-testid=webcam-stream]');
+  await page.waitForFunction(() => document.querySelector('[data-testid=webcam-stream]')?.naturalWidth > 0, null, {
+    timeout: 15_000,
+  });
+  await page.screenshot({ path: `${OUT}/home-webcam.png` });
+  await page.getByTestId('preview').click();
+  await page.waitForSelector('[data-testid=preview-modal]');
+  await page.waitForTimeout(500);
+  await page.screenshot({ path: `${OUT}/preview-webcam.png` });
+  await page.getByTestId('preview-modal').getByRole('button', { name: 'Close', exact: true }).last().click();
+  await page.getByTestId('preview-toggle').click();
+  log('webcam', 'stream shown in the preview and enlarged');
+
+  if (DEV) {
+    await page.evaluate(() => window.__fot.idle.sleep());
+    await page.waitForSelector('[data-testid=screensaver][data-mode=screensaver]');
+    await page.waitForTimeout(600);
+    await page.screenshot({ path: `${OUT}/saver-printing.png` });
+    await page.mouse.click(512, 540);
+    await page.waitForSelector('[data-testid=screensaver]', { state: 'detached' });
+  }
+
+  await page.waitForSelector('[data-testid=notice]', { timeout: 120_000 });
+  const kind = await page.getAttribute('[data-testid=notice] [data-kind]', 'data-kind');
+  if (kind !== 'done') throw new Error(`unexpected notice ${kind}`);
+  await page.waitForTimeout(400);
+  await page.screenshot({ path: `${OUT}/notice-done.png` });
+  if (DEV) await terminalHas(page, 'M300');
+  await page.getByTestId('notice-ok').click();
+  await page.waitForSelector('.home[data-view=idle]');
+  await api(page, 'DELETE', `/api/files/local/${SMOKE_FILE}`);
+  log('print done', `notice shown${DEV ? ', M300 beep sent' : ''}`);
+}
+
+// Screensaver after the timeout; the wake-up tap must not press the button underneath.
+async function screensaver(page) {
+  await page.goto(`${BASE_URL}/#/home`);
+  await page.waitForSelector('[data-testid=connection-overlay]', { state: 'detached', timeout: 60_000 });
+  await page.waitForSelector('[data-testid=preheat-pla]');
+  await api(page, 'POST', '/api/printer/tool', { command: 'target', targets: { tool0: 0 } });
+  await page.waitForFunction(() => !window.__fot.temperatures.latest.tool0?.target);
+  const box = await page.getByTestId('preheat-pla').boundingBox();
+  await page.evaluate(() => window.__fot.settings.update((s) => (s.screensaver.timeoutMin = 0.05)));
+  await page.waitForSelector('[data-testid=screensaver][data-mode=screensaver]', { timeout: 15_000 });
+  await page.waitForTimeout(600);
+  await page.screenshot({ path: `${OUT}/saver-idle.png` });
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  await page.waitForSelector('[data-testid=screensaver]', { state: 'detached' });
+  await page.waitForTimeout(800);
+  const target = await page.evaluate(() => window.__fot.temperatures.latest.tool0?.target ?? 0);
+  if (target !== 0 || (await page.getByTestId('toast').count())) {
+    throw new Error('the wake-up tap reached the button under the screensaver');
+  }
+  await page.evaluate(async () => {
+    window.__fot.settings.update((s) => (s.screensaver.timeoutMin = 5));
+    await window.__fot.settings.flush();
+  });
+  log('screensaver', 'shown after the timeout, wake-up tap swallowed');
+
+  // Screen off: the agent switches the output (no-op in dev), a tap turns it back on.
+  await page.evaluate(() => window.__fot.idle.sleep('off'));
+  await page.waitForSelector('[data-testid=screensaver][data-mode=off]');
+  await page.waitForFunction(async () => (await (await fetch('/local/display')).json()).on === false);
+  await page.mouse.click(512, 300);
+  await page.waitForSelector('[data-testid=screensaver]', { state: 'detached' });
+  await page.waitForFunction(async () => (await (await fetch('/local/display')).json()).on === true);
+  log('screen off', 'display off through the agent, back on at the first tap');
+}
+
 async function kiosk(page) {
   await page.goto(`${BASE_URL}/?kiosk=1#/home`);
   await page.waitForSelector('[data-testid=gauge-hotend]');
@@ -177,6 +333,8 @@ try {
   });
   if (DEV) await debugPage(page);
   await shell(page);
+  await printFlow(page);
+  if (DEV) await screensaver(page);
   await kiosk(page);
   if (DEV) await gallery(page);
 

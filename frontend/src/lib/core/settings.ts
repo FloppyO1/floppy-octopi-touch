@@ -7,7 +7,7 @@
  */
 import { defaultCapabilityOverrides, type CapabilityOverrides } from './capabilities';
 
-export const SETTINGS_VERSION = 2;
+export const SETTINGS_VERSION = 3;
 
 export type Language = 'en' | 'it';
 export const LANGUAGES: readonly Language[] = ['en', 'it'];
@@ -36,6 +36,10 @@ export interface Macro {
 }
 
 export type ExtruderType = 'unknown' | 'direct' | 'bowden';
+
+/** What the Home screen shows next to the job: the file's thumbnail or the webcam. */
+export const HOME_PREVIEWS = ['thumbnail', 'webcam'] as const;
+export type HomePreview = (typeof HOME_PREVIEWS)[number];
 
 export interface Settings {
   schemaVersion: number;
@@ -67,6 +71,9 @@ export interface Settings {
     purgeLength: number;
   };
   capabilities: { overrides: CapabilityOverrides };
+  /** Manual stream URL; empty = the webcam configured in OctoPrint. */
+  webcam: { url: string };
+  home: { preview: HomePreview };
 }
 
 export function defaultSettings(): Settings {
@@ -111,6 +118,8 @@ export function defaultSettings(): Settings {
       purgeLength: 20,
     },
     capabilities: { overrides: defaultCapabilityOverrides() },
+    webcam: { url: '' },
+    home: { preview: 'thumbnail' },
   };
 }
 
@@ -123,6 +132,8 @@ type Doc = Record<string, unknown>;
 const MIGRATIONS: Record<number, (doc: Doc) => Doc> = {
   // v1 (agent defaults, session 1): only language and clock24h.
   1: (doc) => doc,
+  // v3 (session 4): `webcam` and `home` added, both from the defaults.
+  2: (doc) => doc,
 };
 
 const isObject = (v: unknown): v is Doc => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -161,6 +172,7 @@ export function migrateSettings(raw: unknown): MigrationResult {
   const settings = mergeOver(defaultSettings(), doc);
   if (!LANGUAGES.includes(settings.language)) settings.language = 'en';
   if (!ACCENTS.includes(settings.accent)) settings.accent = 'teal';
+  if (!HOME_PREVIEWS.includes(settings.home.preview)) settings.home.preview = 'thumbnail';
   // Array items are user data: drop malformed ones instead of failing later in the UI.
   settings.presets = settings.presets.filter(
     (p) => isObject(p) && typeof p.id === 'string' && typeof p.name === 'string' &&

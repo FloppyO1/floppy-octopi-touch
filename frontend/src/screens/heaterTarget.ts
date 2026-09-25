@@ -1,6 +1,10 @@
-/** Tap on a heater: NumPad with presets, confirmation above the configured threshold, then set the target. */
+/**
+ * Heater targets: tap on a gauge (NumPad with presets), preheat presets and cooldown, all with the
+ * confirmation above the configured threshold.
+ */
+import type { TemperaturePreset } from '../lib/core/settings';
 import { t } from '../lib/i18n/index.svelte';
-import { settings, temperatures } from '../lib/stores';
+import { settings, temperatures, tune } from '../lib/stores';
 import { dialogs } from '../lib/ui/dialogs.svelte';
 import { toast } from '../lib/ui/toast.svelte';
 
@@ -20,19 +24,46 @@ export async function askHeaterTarget(heater: string): Promise<void> {
     ],
   });
   if (value === null) return;
-
-  const confirmAbove = isBed ? limits.confirmAbove.bed : limits.confirmAbove.hotend;
-  if (value > confirmAbove) {
-    const ok = await dialogs.confirm({
-      title: t('temps.highTitle'),
-      message: t('temps.highMessage', { heater: name, value, limit: confirmAbove }),
-      confirmLabel: t('temps.highConfirm', { value }),
-      tone: 'warning',
-    });
-    if (!ok) return;
-  }
+  if (!(await confirmHigh(heater, value))) return;
   try {
     await temperatures.setTarget(heater, value);
+  } catch {
+    toast.show(t('temps.setFailed'), { tone: 'error' });
+  }
+}
+
+/** Asks for confirmation if `value` is above the configured threshold of `heater`. */
+async function confirmHigh(heater: string, value: number): Promise<boolean> {
+  const limits = settings.value.temperature.confirmAbove;
+  const confirmAbove = heater === 'bed' ? limits.bed : limits.hotend;
+  if (value <= confirmAbove) return true;
+  return dialogs.confirm({
+    title: t('temps.highTitle'),
+    message: t('temps.highMessage', { heater: t(`heater.${heater}`), value, limit: confirmAbove }),
+    confirmLabel: t('temps.highConfirm', { value }),
+    tone: 'warning',
+  });
+}
+
+/** Heats hotend and bed to a preset (and sets its fan, if any). */
+export async function preheat(preset: TemperaturePreset): Promise<void> {
+  if (!(await confirmHigh('tool0', preset.hotend)) || !(await confirmHigh('bed', preset.bed))) return;
+  try {
+    await Promise.all([
+      temperatures.setTarget('tool0', preset.hotend),
+      temperatures.setTarget('bed', preset.bed),
+      preset.fan === null ? undefined : tune.setFan(preset.fan),
+    ]);
+    toast.show(t('temps.preheating', { name: preset.name }), { tone: 'ok' });
+  } catch {
+    toast.show(t('temps.setFailed'), { tone: 'error' });
+  }
+}
+
+export async function cooldown(): Promise<void> {
+  try {
+    await temperatures.allOff();
+    toast.show(t('temps.cooling'), { tone: 'ok' });
   } catch {
     toast.show(t('temps.setFailed'), { tone: 'error' });
   }

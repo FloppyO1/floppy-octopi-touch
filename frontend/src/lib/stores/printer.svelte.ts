@@ -1,7 +1,10 @@
 /** Printer state (flags from the push API) and job/progress. */
-import { job as jobApi } from '../api/octoprint';
-import type { CurrentPayload, JobInfo, JobProgress, PrinterState } from '../api/types';
+import { job as jobApi, printer as printerApi } from '../api/octoprint';
+import type { Axis, CurrentPayload, JobInfo, JobProgress, PrinterState } from '../api/types';
+import { DLP_SOCKET_PLUGIN, parseLayerInfo } from '../core/layer';
+import type { LocalActions } from '../core/notices';
 import { JOB_PHASES, printerPhase } from '../core/printerState';
+import { server } from './server.svelte';
 import { sameJson } from './util';
 
 class PrinterStore {
@@ -24,6 +27,8 @@ class PrinterStore {
       this.busyFiles = payload.busyFiles;
     }
   }
+
+  home = (axes?: Axis[]) => printerApi.home(axes);
 }
 
 class JobStore {
@@ -40,6 +45,10 @@ class JobStore {
       ? new Date(this.updatedAt + this.progress.printTimeLeft * 1000)
       : null,
   );
+  /** Current/total layer, only with the DisplayLayerProgress plugin. */
+  layer = $derived(
+    server.plugins.displayLayerProgress ? parseLayerInfo(server.pluginMessages[DLP_SOCKET_PLUGIN]) : null,
+  );
 
   update(payload: Partial<CurrentPayload>): void {
     if (payload.job && !sameJson(payload.job, this.info)) this.info = payload.job;
@@ -49,10 +58,19 @@ class JobStore {
     }
   }
 
+  /** Pause/cancel requested from this dashboard (their events are not announced again). */
+  readonly local: LocalActions = {};
+
   start = () => jobApi.start();
-  pause = () => jobApi.pause();
+  pause = () => {
+    this.local.pauseAt = Date.now();
+    return jobApi.pause();
+  };
   resume = () => jobApi.resume();
-  cancel = () => jobApi.cancel();
+  cancel = () => {
+    this.local.cancelAt = Date.now();
+    return jobApi.cancel();
+  };
 }
 
 export const printer = new PrinterStore();
