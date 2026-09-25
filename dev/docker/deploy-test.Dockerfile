@@ -6,5 +6,5 @@ FROM debian:bookworm
 
 RUN apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-       ca-certificates curl python3 sudo systemd udev util-linux procps cage chromium \
+       ca-certificates curl python3 sudo systemd udev util-linux procps dbus cage chromium \
     && rm -rf /var/lib/apt/lists/*

@@ -45,8 +45,8 @@ print(value if isinstance(value, str) else json.dumps(value))
 }
 
 wait_url() {
-  local i
-  for i in $(seq 1 100); do
+  local _
+  for _ in $(seq 1 100); do
     curl -fsS -o /dev/null --max-time 1 "$1" 2>/dev/null && return 0
     sleep 0.2
   done
@@ -93,8 +93,7 @@ WantedBy=multi-user.target
 EOF
 systemctl enable -q getty@tty1.service
 python3 /test/fake_octoprint.py "$KEY" &
-check "fake OctoPrint on :5000" wait_url "http://127.0.0.1:5000/robots.txt" || true
-curl -s -o /dev/null http://127.0.0.1:5000/api/version || true
+check "fake OctoPrint on :5000" wait_url "http://127.0.0.1:5000/robots.txt"
 
 section "install.sh --non-interactive --api-key=…"
 bash "$src/deploy/install.sh" --non-interactive --api-key="$KEY"
@@ -132,7 +131,9 @@ check "pi may restart the kiosk" runuser -u pi -- sudo -n -l /usr/bin/systemctl 
 check "pi may eject a stick" runuser -u pi -- sudo -n -l $PREFIX/deploy/usb/usb-mount.sh eject /media/usb-KINGSTON
 check "pi may not restart OctoPrint" test "$(runuser -u pi -- sudo -n -l /usr/bin/systemctl restart octoprint 2>/dev/null)" = ""
 check "udev rule for pi" grep -q 'usb-mount.sh add %k pi"' /etc/udev/rules.d/99-floppyoctotouch-usb.rules
-check "pi in the video/input/render groups" bash -c '[[ " $(id -nG pi) " == *" video "*" input "* ]] && id -nG pi | grep -qw render'
+for group in video input render; do
+  check "pi in the $group group" bash -c "id -nG pi | grep -qw $group"
+done
 check_eq "display block in config.txt" 1 "$(count '# >>> FloppyOctoTouch display >>>' $BOOT/config.txt)"
 check_eq "video= in cmdline.txt" 1 "$(count 'video=HDMI-A-1:1024x600@60' $BOOT/cmdline.txt)"
 check "cmdline.txt is still one line" test "$(wc -l <$BOOT/cmdline.txt)" = 1
@@ -215,7 +216,7 @@ echo 'FOT_CHROMIUM_FLAGS=--kept-by-update' >>/etc/floppyoctotouch/kiosk.env
 runuser -u pi -- sh -c 'echo "{\"schemaVersion\": 7, \"marker\": true}" >~/.config/floppyoctotouch/settings.json'
 mkdir -p /tmp/bad
 cp "$work/floppyoctotouch-$version.tar.gz" /tmp/bad/
-sed 's/^./0/' "$work/floppyoctotouch-$version.tar.gz.sha256" >/tmp/bad/floppyoctotouch-$version.tar.gz.sha256
+sed 's/^./0/' "$work/floppyoctotouch-$version.tar.gz.sha256" >"/tmp/bad/floppyoctotouch-$version.tar.gz.sha256"
 check "damaged tarball refused" bash -c "! floppyoctotouch-update --non-interactive --force /tmp/bad/floppyoctotouch-$version.tar.gz"
 check "same version refused without --force" bash -c \
   "! floppyoctotouch-update --non-interactive $work/floppyoctotouch-$version.tar.gz"
@@ -237,6 +238,21 @@ check "commands removed" test ! -e /usr/local/bin/floppyoctotouch-update
 check "config.txt restored" cmp /tmp/config.txt.orig $BOOT/config.txt
 check "cmdline.txt restored" cmp /tmp/cmdline.txt.orig $BOOT/cmdline.txt
 check "configuration kept without --purge" test -f $CONFIG
+
+section "install.sh from a git clone (bundled release/ tarball)"
+clone=/tmp/clone
+mkdir -p "$clone/release" "$clone/agent"
+cp -r "$src/deploy" "$clone/deploy"
+cp "$work/floppyoctotouch-$version.tar.gz" "$work/floppyoctotouch-$version.tar.gz.sha256" "$clone/release/"
+printf '[project]\nversion = "%s"\n' "$version" >"$clone/agent/pyproject.toml"
+bash "$clone/deploy/install.sh" --non-interactive --skip-display-config
+check_eq "installed from the bundled tarball" "$version" "$(cat $PREFIX/VERSION)"
+check_eq "saved API key reused" "$KEY" "$(config_value api_key)"
+check "display settings skipped" cmp /tmp/config.txt.orig $BOOT/config.txt
+sed -i 's/^./0/' "$clone/release/floppyoctotouch-$version.tar.gz.sha256"
+check "damaged bundled tarball refused" bash -c "! bash $clone/deploy/install.sh --non-interactive 2>/dev/null"
+floppyoctotouch-uninstall --non-interactive --purge
+check "configuration deleted with --purge" test ! -e /home/pi/.config/floppyoctotouch
 
 printf '\n%d passed, %d failed\n' "$PASSED" "$FAILED"
 [ "$FAILED" = 0 ]

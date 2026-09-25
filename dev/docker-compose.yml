@@ -169,6 +169,18 @@ services:
       - frontend-node-modules:/src/frontend/node_modules
     command: bash scripts/build-release.sh
 
+  # Installer test on Debian bookworm (like OctoPi 1.1.0) with the tarball in release/: dev/deploy-test/run.sh.
+  deploy-test:
+    profiles: [tools]
+    build:
+      context: ..
+      dockerfile: dev/docker/deploy-test.Dockerfile
+    image: floppyoctotouch-deploy-test-dev
+    volumes:
+      - ../release:/release:ro
+      - ./deploy-test:/test:ro
+    command: bash /test/run.sh
+
   shellcheck:
     profiles: [tools]
     image: koalaman/shellcheck-alpine:stable

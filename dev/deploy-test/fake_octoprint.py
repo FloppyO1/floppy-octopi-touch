@@ -9,7 +9,9 @@ API_KEY = sys.argv[1]
 
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802 (http.server naming)
-        if not self.path.startswith("/api/version"):
+        if self.path == "/robots.txt":
+            self._json(200, {})
+        elif not self.path.startswith("/api/version"):
             self._json(404, {"error": "not found"})
         elif self.headers.get("X-Api-Key") == API_KEY:
             self._json(200, {"api": "0.1", "server": "1.11.8", "text": "OctoPrint 1.11.8"})

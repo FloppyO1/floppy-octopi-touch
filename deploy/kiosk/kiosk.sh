@@ -34,8 +34,10 @@ fi
 # SD card (XDG_RUNTIME_DIR is a tmpfs). The dashboard settings live in the agent, not in the browser.
 profile="${XDG_RUNTIME_DIR:-/tmp}/floppyoctotouch-chromium"
 rm -rf -- "$profile"
-mkdir -p -m 700 -- "$profile"
+mkdir -p -- "$profile"
+chmod 700 -- "$profile"
 
+# shellcheck disable=SC2054  # the comma in --disable-features is part of the value
 flags=(
   --kiosk
   --noerrdialogs

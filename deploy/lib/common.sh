@@ -1,4 +1,5 @@
 # shellcheck shell=bash
+# shellcheck disable=SC2034  # constants used by the scripts that source this file
 # Helpers shared by install.sh, update.sh and uninstall.sh (sourced, never run on its own).
 
 FOT_PREFIX=/opt/floppyoctotouch

@@ -7,7 +7,7 @@ set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 SRC_DIR=$(dirname "$SCRIPT_DIR")
-# shellcheck source=lib/common.sh
+# shellcheck source=SCRIPTDIR/lib/common.sh
 . "$SCRIPT_DIR/lib/common.sh"
 
 usage() {

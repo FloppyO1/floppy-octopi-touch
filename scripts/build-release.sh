@@ -48,7 +48,7 @@ cp -r "$ROOT/agent/pyproject.toml" "$ROOT/agent/README.md" "$ROOT/agent/floppyoc
 find "$stage/agent-src" -name '__pycache__' -type d -prune -exec rm -rf {} +
 python3 -m pip wheel --quiet --disable-pip-version-check --no-deps --wheel-dir "$dir/agent" \
   "$stage/agent-src"
-ls "$dir/agent"/floppyoctotouch_agent-"$version"-*.whl >/dev/null 2>&1 ||
+ls "$dir/agent/floppyoctotouch_agent-$version-"*.whl >/dev/null 2>&1 ||
   die "the agent wheel was not built"
 
 cp -r "$ROOT/deploy" "$dir/deploy"
