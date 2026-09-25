@@ -156,6 +156,19 @@ services:
       - ./fake-usb:/fake-usb
     command: sh -c "npm install --no-audit --prefer-offline && node screenshot.mjs"
 
+  # Release tarball for the Pi: release/floppyoctotouch-<version>.tar.gz (+ .sha256).
+  release:
+    profiles: [tools]
+    build:
+      context: ..
+      dockerfile: dev/docker/release.Dockerfile
+    image: floppyoctotouch-release-dev
+    working_dir: /src
+    volumes:
+      - ..:/src
+      - frontend-node-modules:/src/frontend/node_modules
+    command: bash scripts/build-release.sh
+
   shellcheck:
     profiles: [tools]
     image: koalaman/shellcheck-alpine:stable

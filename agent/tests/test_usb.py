@@ -38,6 +38,15 @@ async def test_lists_only_gcode_on_mounted_sticks(make_client, stick):
     assert body["files"][0]["size"] == 4000
 
 
+async def test_installer_mount_points_are_named_after_the_label(make_client, tmp_path):
+    root = tmp_path / "media" / "usb-KINGSTON"
+    root.mkdir(parents=True)
+    (root / "cube.gcode").write_text("G28\n")
+    client = await make_client()
+    body = await (await client.get("/local/usb")).json()
+    assert body["mounts"] == [{"id": "usb-KINGSTON", "name": "KINGSTON"}]
+
+
 async def test_empty_mount_point_is_not_a_stick(make_client, tmp_path):
     (tmp_path / "media" / "usb1").mkdir(parents=True)
     client = await make_client()

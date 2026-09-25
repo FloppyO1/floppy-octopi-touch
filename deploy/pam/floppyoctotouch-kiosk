@@ -1,0 +1,6 @@
+# PAM session of floppyoctotouch-kiosk.service (installed as /etc/pam.d/floppyoctotouch-kiosk).
+# pam_systemd registers a logind session on seat0 / tty1, which cage needs to open the display and inputs.
+auth     required  pam_unix.so nullok
+account  required  pam_unix.so
+session  required  pam_unix.so
+session  required  pam_systemd.so

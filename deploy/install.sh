@@ -1,0 +1,729 @@
+#!/usr/bin/env bash
+# FloppyOctoTouch installer for OctoPi 1.1.0 (Raspberry Pi OS Bookworm Lite, arm64 or armhf).
+#
+# Run it from an extracted release: sudo ./deploy/install.sh
+# It is idempotent: running it again repairs or reconfigures an installation. See README "Installation".
+set -euo pipefail
+
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+SRC_DIR=$(dirname "$SCRIPT_DIR")
+# shellcheck source=lib/common.sh
+. "$SCRIPT_DIR/lib/common.sh"
+
+usage() {
+  cat <<EOF
+Usage: sudo $0 [options]
+
+Installs the FloppyOctoTouch dashboard: agent service, cage + Chromium kiosk on tty1, USB stick automount.
+
+Options:
+  --non-interactive      never ask: use the detected/default answers (display settings included,
+                         unless --skip-display-config)
+  --api-key=KEY          OctoPrint API key (checked against OctoPrint); without it the saved key is kept,
+                         or it can be entered later on the touch screen
+  --user=NAME            user that runs the dashboard (default: the user of octoprint.service)
+  --octoprint-url=URL    OctoPrint address (default: http://127.0.0.1:<port of octoprint.service>)
+  --skip-display-config  do not touch config.txt / cmdline.txt
+  --listen-lan           let the agent listen on every network interface. WARNING: it adds the API key to
+                         every request, so anyone on the network gets full control of the printer
+  --update               used by update.sh: keep the configuration, no questions about key and display
+  -h, --help             show this help
+EOF
+}
+
+API_KEY=''
+API_KEY_GIVEN=0
+USER_ARG=''
+OCTOPRINT_URL=''
+SKIP_DISPLAY=0
+LISTEN_LAN=0
+UPDATE=0
+
+parse_args() {
+  local arg
+  for arg in "$@"; do
+    case $arg in
+      --non-interactive) NON_INTERACTIVE=1 ;;
+      --api-key=*)
+        API_KEY=${arg#*=}
+        API_KEY_GIVEN=1
+        ;;
+      --user=*) USER_ARG=${arg#*=} ;;
+      --octoprint-url=*) OCTOPRINT_URL=${arg#*=} ;;
+      --skip-display-config) SKIP_DISPLAY=1 ;;
+      --listen-lan) LISTEN_LAN=1 ;;
+      --update)
+        UPDATE=1
+        SKIP_DISPLAY=1
+        ;;
+      -h | --help)
+        usage
+        exit 0
+        ;;
+      *) die "unknown option: $arg (see --help)" ;;
+    esac
+  done
+}
+
+# ------------------------------------------------------------------------------------ payload
+FRONTEND_SRC=''
+AGENT_WHEEL=''
+AGENT_SRC=''
+VERSION=''
+
+find_payload() {
+  if [ -f "$SRC_DIR/VERSION" ]; then
+    VERSION=$(tr -d '[:space:]' <"$SRC_DIR/VERSION")
+  elif [ -f "$SRC_DIR/agent/pyproject.toml" ]; then
+    VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' "$SRC_DIR/agent/pyproject.toml" | head -n1)
+  fi
+  [ -n "$VERSION" ] || die "cannot tell the version: run the installer from an extracted release"
+
+  # Release layout: frontend/ = built app. Git checkout: frontend/dist (built with Docker on a PC).
+  if [ -f "$SRC_DIR/frontend/dist/index.html" ]; then
+    FRONTEND_SRC=$SRC_DIR/frontend/dist
+  elif [ -f "$SRC_DIR/frontend/index.html" ] && [ ! -f "$SRC_DIR/frontend/package.json" ]; then
+    FRONTEND_SRC=$SRC_DIR/frontend
+  else
+    die "no built web app found: use a release tarball (scripts/build-release.sh), the Pi cannot build it"
+  fi
+
+  AGENT_WHEEL=$({ find "$SRC_DIR/agent" -maxdepth 1 -name 'floppyoctotouch_agent-*.whl' 2>/dev/null ||
+    true; } | sort | tail -n1)
+  if [ -z "$AGENT_WHEEL" ]; then
+    [ -f "$SRC_DIR/agent/pyproject.toml" ] || die "agent package not found in $SRC_DIR/agent"
+    AGENT_SRC=$SRC_DIR/agent
+  fi
+}
+
+# ------------------------------------------------------------------------------------ checks
+check_system() {
+  local codename='' arch model
+  # shellcheck source=/dev/null
+  [ -f /etc/os-release ] && codename=$(. /etc/os-release && printf '%s' "${VERSION_CODENAME:-}")
+  if [ "$codename" = bookworm ]; then
+    ok "Debian/Raspberry Pi OS bookworm"
+  else
+    warn "this installer targets OctoPi 1.1.0 (bookworm), this system is '${codename:-unknown}'"
+    ask_yes_no "Continue anyway?" n || die "aborted"
+  fi
+
+  arch=$(dpkg --print-architecture)
+  case $arch in
+    arm64 | armhf) ok "architecture $arch" ;;
+    *) warn "architecture $arch: not a Raspberry Pi, continuing (test system?)" ;;
+  esac
+  if [ -r /proc/device-tree/model ]; then
+    model=$(tr -d '\0' </proc/device-tree/model)
+    info "board: $model"
+  fi
+  command -v python3 >/dev/null || die "python3 is missing (OctoPi ships it)"
+  command -v systemctl >/dev/null || die "systemd is required"
+}
+
+OCTOPRINT_UNIT_TEXT=''
+
+read_octoprint_unit() {
+  local file
+  if systemd_running; then
+    OCTOPRINT_UNIT_TEXT=$(systemctl cat octoprint.service 2>/dev/null || true)
+  fi
+  if [ -z "$OCTOPRINT_UNIT_TEXT" ]; then
+    for file in /etc/systemd/system/octoprint.service /lib/systemd/system/octoprint.service \
+      /usr/lib/systemd/system/octoprint.service; do
+      if [ -f "$file" ]; then
+        OCTOPRINT_UNIT_TEXT=$(cat "$file")
+        break
+      fi
+    done
+  fi
+}
+
+# Value of an OctoPrint command line option (--port=5000 or --port 5000) in the unit's ExecStart.
+octoprint_option() {
+  { grep '^ExecStart=' <<<"$OCTOPRINT_UNIT_TEXT" || true; } | tail -n1 |
+    sed -n "s/.*--$1[= ]\([^ ]*\).*/\1/p"
+}
+
+FOT_USER=''
+FOT_GROUP=''
+FOT_UID=''
+FOT_HOME=''
+
+choose_user() {
+  local detected=''
+  detected=$(printf '%s\n' "$OCTOPRINT_UNIT_TEXT" | sed -n 's/^User=//p' | tail -n1)
+  if [ -n "$detected" ]; then
+    info "octoprint.service runs as '$detected'"
+  else
+    warn "octoprint.service not found"
+    if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != root ]; then
+      detected=$SUDO_USER
+    elif id pi >/dev/null 2>&1; then
+      detected=pi
+    fi
+  fi
+
+  if [ -n "$USER_ARG" ]; then
+    FOT_USER=$USER_ARG
+  elif [ "$UPDATE" = 1 ] && [ -n "${FOT_USER_SAVED:-}" ]; then
+    FOT_USER=$FOT_USER_SAVED
+  else
+    [ -n "$detected" ] || [ "$NON_INTERACTIVE" = 0 ] || die "cannot detect the OctoPrint user: add --user=NAME"
+    FOT_USER=$(ask_value "User that runs OctoPrint and the dashboard:" "$detected")
+  fi
+  [[ $FOT_USER =~ ^[a-z_][a-z0-9_-]*$ ]] || die "invalid user name '$FOT_USER'"
+  id "$FOT_USER" >/dev/null 2>&1 || die "user '$FOT_USER' does not exist"
+  FOT_UID=$(id -u "$FOT_USER")
+  [ "$FOT_UID" != 0 ] || die "the dashboard must not run as root"
+  FOT_GROUP=$(id -gn "$FOT_USER")
+  FOT_HOME=$(user_home "$FOT_USER")
+  [ -d "$FOT_HOME" ] || die "home directory of $FOT_USER not found"
+  if [ -n "$detected" ] && [ "$FOT_USER" != "$detected" ]; then
+    warn "OctoPrint runs as '$detected': thumbnails are read from its uploads only if $FOT_USER can read them"
+  fi
+  ok "dashboard user: $FOT_USER (uid $FOT_UID)"
+}
+
+# HTTP status of a GET (000 = no answer). The API key goes through the environment, not the command line.
+http_status() {
+  FOT_KEY=${2:-} python3 - "$1" <<'PY'
+import os, sys, urllib.error, urllib.request
+
+request = urllib.request.Request(sys.argv[1])
+if os.environ.get("FOT_KEY"):
+    request.add_header("X-Api-Key", os.environ["FOT_KEY"])
+try:
+    with urllib.request.urlopen(request, timeout=5) as response:
+        print(response.status)
+except urllib.error.HTTPError as error:
+    print(error.code)
+except Exception:
+    print("000")
+PY
+}
+
+OCTOPRINT_REACHABLE=0
+UPLOADS_DIR=''
+
+check_octoprint() {
+  local port basedir status
+  port=$(octoprint_option port)
+  basedir=$(octoprint_option basedir)
+  [ -n "$OCTOPRINT_URL" ] || OCTOPRINT_URL=http://127.0.0.1:${port:-5000}
+  OCTOPRINT_URL=${OCTOPRINT_URL%/}
+  UPLOADS_DIR=${basedir:-$FOT_HOME/.octoprint}/uploads
+
+  status=$(http_status "$OCTOPRINT_URL/api/version")
+  if [ "$status" = 000 ]; then
+    warn "OctoPrint does not answer on $OCTOPRINT_URL"
+    if [ "$UPDATE" = 0 ]; then
+      ask_yes_no "Continue anyway (the API key cannot be checked)?" n ||
+        die "start OctoPrint (sudo systemctl start octoprint) or pass --octoprint-url=URL"
+    fi
+  else
+    OCTOPRINT_REACHABLE=1
+    ok "OctoPrint answers on $OCTOPRINT_URL"
+  fi
+}
+
+# ------------------------------------------------------------------------------------ packages
+install_packages() {
+  local -a wanted=(cage python3-venv wlr-randr fonts-dejavu-core curl) missing=()
+  local pkg chromium=''
+  for pkg in chromium chromium-browser; do
+    if pkg_installed "$pkg"; then
+      chromium=$pkg
+    fi
+  done
+  for pkg in "${wanted[@]}"; do
+    pkg_installed "$pkg" || missing+=("$pkg")
+  done
+  if [ -z "$chromium" ] || [ ${#missing[@]} -gt 0 ]; then
+    info "updating the package lists"
+    apt-get update -q
+  fi
+  if [ -z "$chromium" ]; then
+    # Raspberry Pi OS renamed chromium-browser to chromium; take whichever has a candidate.
+    for pkg in chromium chromium-browser; do
+      if grep -q 'Candidate: [0-9]' <<<"$(apt-cache policy "$pkg" 2>/dev/null || true)"; then
+        chromium=$pkg
+        break
+      fi
+    done
+    [ -n "$chromium" ] || die "no Chromium package available (chromium / chromium-browser)"
+    missing+=("$chromium")
+  fi
+  if [ ${#missing[@]} -gt 0 ]; then
+    info "installing: ${missing[*]}"
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -q "${missing[@]}"
+  fi
+  ok "packages: cage, $chromium, python3-venv, wlr-randr, fonts-dejavu-core, curl"
+}
+
+# ------------------------------------------------------------------------------------ files
+# Replaces a directory with a copy of another one (new inode: running scripts keep their old copy).
+replace_dir() {
+  local src=$1 dest=$2
+  if [ -e "$dest" ] && [ "$src" -ef "$dest" ]; then
+    return 0
+  fi
+  rm -rf -- "$dest.new"
+  cp -r -- "$src" "$dest.new"
+  rm -rf -- "$dest"
+  mv -- "$dest.new" "$dest"
+}
+
+install_files() {
+  mkdir -p "$FOT_PREFIX"
+  replace_dir "$FRONTEND_SRC" "$FOT_PREFIX/frontend"
+  replace_dir "$SCRIPT_DIR" "$FOT_PREFIX/deploy"
+  if [ -n "$AGENT_WHEEL" ]; then
+    rm -rf "$FOT_PREFIX/agent.new"
+    mkdir -p "$FOT_PREFIX/agent.new"
+    cp -- "$AGENT_WHEEL" "$FOT_PREFIX/agent.new/"
+    rm -rf "$FOT_PREFIX/agent"
+    mv "$FOT_PREFIX/agent.new" "$FOT_PREFIX/agent"
+    AGENT_WHEEL=$FOT_PREFIX/agent/$(basename "$AGENT_WHEEL")
+  else
+    replace_dir "$AGENT_SRC" "$FOT_PREFIX/agent"
+    AGENT_SRC=$FOT_PREFIX/agent
+  fi
+  printf '%s\n' "$VERSION" >"$FOT_PREFIX/VERSION"
+  for doc in README.md LICENSE CHANGELOG.md; do
+    if [ -f "$SRC_DIR/$doc" ] && ! [ "$SRC_DIR/$doc" -ef "$FOT_PREFIX/$doc" ]; then
+      cp -- "$SRC_DIR/$doc" "$FOT_PREFIX/$doc"
+    fi
+  done
+  chown -R root:root "$FOT_PREFIX"
+  chmod -R u=rwX,go=rX "$FOT_PREFIX/frontend" "$FOT_PREFIX/deploy" "$FOT_PREFIX/agent"
+  find "$FOT_PREFIX/deploy" -name '*.sh' -exec chmod 755 {} +
+  ln -sfn "$FOT_PREFIX/deploy/update.sh" "$BIN_DIR/floppyoctotouch-update"
+  ln -sfn "$FOT_PREFIX/deploy/uninstall.sh" "$BIN_DIR/floppyoctotouch-uninstall"
+  ok "files in $FOT_PREFIX"
+}
+
+install_venv() {
+  local venv=$FOT_PREFIX/venv system_version venv_version='' target installed
+  system_version=$(python3 -c 'import platform; print(platform.python_version())')
+  if [ -x "$venv/bin/python" ]; then
+    venv_version=$("$venv/bin/python" -c 'import platform; print(platform.python_version())' || true)
+  fi
+  if [ "$venv_version" != "$system_version" ]; then
+    info "creating the Python $system_version virtual environment"
+    rm -rf "$venv"
+    python3 -m venv "$venv"
+  fi
+  target=${AGENT_WHEEL:-$AGENT_SRC}
+  info "installing the agent and its dependencies (aiohttp)"
+  "$venv/bin/pip" install -q --disable-pip-version-check --no-cache-dir "$target"
+  # Same version number but a new build (e.g. a repaired installation): replace the agent itself.
+  "$venv/bin/pip" install -q --disable-pip-version-check --no-cache-dir --force-reinstall --no-deps "$target"
+  installed=$("$venv/bin/floppyoctotouch-agent" --version)
+  [ "$installed" = "$VERSION" ] || warn "the agent reports version $installed, expected $VERSION"
+  ok "agent $installed in $venv"
+}
+
+# ------------------------------------------------------------------------------------ agent config
+CONFIG_DIR=''
+CONFIG_FILE=''
+SAVED_KEY=''
+
+read_saved_key() {
+  CONFIG_DIR=$FOT_HOME/.config/floppyoctotouch
+  CONFIG_FILE=$CONFIG_DIR/config.json
+  SAVED_KEY=''
+  if [ -f "$CONFIG_FILE" ]; then
+    SAVED_KEY=$(python3 -c '
+import json, sys
+try:
+    print(json.load(open(sys.argv[1], encoding="utf-8")).get("api_key", ""))
+except Exception:
+    pass
+' "$CONFIG_FILE")
+  fi
+}
+
+valid_key_format() { [[ $1 =~ ^[A-Za-z0-9_-]{16,128}$ ]]; }
+
+# 0 = accepted (or OctoPrint not reachable: cannot tell), 1 = rejected.
+check_key() {
+  local status
+  [ "$OCTOPRINT_REACHABLE" = 1 ] || return 0
+  status=$(http_status "$OCTOPRINT_URL/api/version" "$1")
+  [ "$status" = 200 ]
+}
+
+key_accepted() {
+  if [ "$OCTOPRINT_REACHABLE" = 1 ]; then
+    ok "API key …${1: -4} accepted by OctoPrint"
+  else
+    warn "API key …${1: -4} saved without checking it (OctoPrint not reachable)"
+  fi
+}
+
+choose_api_key() {
+  local key attempt
+  if [ "$API_KEY_GIVEN" = 1 ]; then
+    valid_key_format "$API_KEY" || die "--api-key: expected 16-128 letters, digits, '-' or '_'"
+    check_key "$API_KEY" || die "OctoPrint rejected the API key given with --api-key"
+    key_accepted "$API_KEY"
+    return
+  fi
+  if [ -n "$SAVED_KEY" ]; then
+    if [ "$UPDATE" = 1 ]; then
+      info "keeping the saved API key …${SAVED_KEY: -4}"
+      return
+    fi
+    if check_key "$SAVED_KEY"; then
+      if ask_yes_no "Keep the saved API key …${SAVED_KEY: -4}?" y; then
+        ok "API key …${SAVED_KEY: -4} kept"
+        return
+      fi
+    else
+      warn "OctoPrint rejects the saved API key …${SAVED_KEY: -4}"
+    fi
+  fi
+  if [ "$UPDATE" = 1 ] || [ "$NON_INTERACTIVE" = 1 ]; then
+    [ -n "$SAVED_KEY" ] || warn "no API key: enter it on the touch screen (the dashboard asks for it)"
+    return
+  fi
+
+  info "The dashboard needs an OctoPrint API key. Create one in OctoPrint from a PC:"
+  info "  Settings (wrench icon) > Application Keys > name 'FloppyOctoTouch' > Generate, then copy it."
+  info "Leave it empty to enter it later on the touch screen."
+  for attempt in 1 2 3; do
+    key=$(ask_secret "OctoPrint API key (typing is hidden):")
+    key=${key//[[:space:]]/}
+    if [ -z "$key" ]; then
+      warn "no API key: enter it on the touch screen (the dashboard asks for it)"
+      return
+    fi
+    if ! valid_key_format "$key"; then
+      warn "that does not look like an API key (16-128 letters, digits, '-' or '_')"
+    elif ! check_key "$key"; then
+      warn "OctoPrint rejected that key (attempt $attempt of 3)"
+    else
+      API_KEY=$key
+      key_accepted "$key"
+      return
+    fi
+  done
+  warn "no valid API key: enter it later on the touch screen"
+}
+
+DISPLAY_OUTPUT=HDMI-A-1
+
+detect_display_output() {
+  local status name
+  for status in /sys/class/drm/card*-HDMI-A-*/status; do
+    [ -r "$status" ] || continue
+    if [ "$(cat "$status")" = connected ]; then
+      name=$(basename "$(dirname "$status")")
+      DISPLAY_OUTPUT=${name#card*-}
+      info "screen connected to $DISPLAY_OUTPUT"
+      return
+    fi
+  done
+}
+
+write_config() {
+  local host=127.0.0.1
+  [ "$LISTEN_LAN" = 1 ] && host=0.0.0.0
+  runuser -u "$FOT_USER" -- mkdir -p "$CONFIG_DIR"
+  chmod 700 "$CONFIG_DIR"
+  # Only the keys managed here are replaced; anything else in config.json is kept.
+  FOT_C_OCTOPRINT_URL=$OCTOPRINT_URL FOT_C_HOST=$host FOT_C_PREFIX=$FOT_PREFIX \
+    FOT_C_UPLOADS=$UPLOADS_DIR FOT_C_SYSTEMCTL=$(command -v systemctl) FOT_C_KIOSK_UNIT=$KIOSK_UNIT \
+    FOT_C_OUTPUT=$DISPLAY_OUTPUT FOT_C_API_KEY=$API_KEY \
+    python3 - "$CONFIG_FILE" "$FOT_USER" "$FOT_GROUP" <<'PY'
+import json, os, shutil, sys, tempfile
+
+path, user, group = sys.argv[1:4]
+env = os.environ
+data = {}
+if os.path.isfile(path):
+    try:
+        with open(path, encoding="utf-8") as fh:
+            loaded = json.load(fh)
+        if isinstance(loaded, dict):
+            data = loaded
+    except ValueError:
+        shutil.copy2(path, path + ".broken")
+data.update({
+    "octoprint_url": env["FOT_C_OCTOPRINT_URL"],
+    "host": env["FOT_C_HOST"],
+    "static_dir": env["FOT_C_PREFIX"] + "/frontend",
+    "uploads_dir": env["FOT_C_UPLOADS"],
+    "usb_roots": ["/media/usb-*"],
+    "usb_eject_command": [
+        "sudo", "-n", env["FOT_C_PREFIX"] + "/deploy/usb/usb-mount.sh", "eject", "{path}"
+    ],
+    "kiosk_restart_command": [
+        "sudo", "-n", env["FOT_C_SYSTEMCTL"], "restart", env["FOT_C_KIOSK_UNIT"]
+    ],
+    "display_backend": "wlr-randr",
+    "display_output": env["FOT_C_OUTPUT"],
+})
+if env.get("FOT_C_API_KEY"):
+    data["api_key"] = env["FOT_C_API_KEY"]
+fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), prefix=".config-", suffix=".json")
+with os.fdopen(fd, "w", encoding="utf-8") as fh:
+    json.dump(data, fh, indent=2)
+    fh.write("\n")
+shutil.chown(tmp, user, group)
+os.chmod(tmp, 0o600)
+os.replace(tmp, path)
+PY
+  ok "agent configuration: $CONFIG_FILE (mode 600)"
+  if [ "$LISTEN_LAN" = 1 ]; then
+    warn "the agent listens on every interface: anyone on the network controls the printer"
+  fi
+}
+
+# ------------------------------------------------------------------------------------ system files
+render() {
+  sed -e "s|@USER@|$FOT_USER|g" -e "s|@GROUP@|$FOT_GROUP|g" -e "s|@UID@|$FOT_UID|g" \
+    -e "s|@HOME@|$FOT_HOME|g" -e "s|@PREFIX@|$FOT_PREFIX|g" -e "s|@SYSTEMCTL@|$(command -v systemctl)|g" \
+    "$1"
+}
+
+install_system_files() {
+  local tmp group
+  install -d -m 755 "$FOT_ETC"
+  install -m 644 "$SCRIPT_DIR/pam/floppyoctotouch-kiosk" "$PAM_FILE"
+  render "$SCRIPT_DIR/systemd/$AGENT_UNIT.in" >"$UNIT_DIR/$AGENT_UNIT"
+  render "$SCRIPT_DIR/systemd/$KIOSK_UNIT.in" >"$UNIT_DIR/$KIOSK_UNIT"
+  chmod 644 "$UNIT_DIR/$AGENT_UNIT" "$UNIT_DIR/$KIOSK_UNIT"
+  if [ ! -f "$FOT_KIOSK_ENV" ]; then
+    install -m 644 "$SCRIPT_DIR/kiosk/kiosk.env" "$FOT_KIOSK_ENV"
+  fi
+  ok "systemd units $AGENT_UNIT and $KIOSK_UNIT, PAM session, $FOT_KIOSK_ENV"
+
+  tmp=$(mktemp)
+  render "$SCRIPT_DIR/sudoers/floppyoctotouch.in" >"$tmp"
+  if command -v visudo >/dev/null && ! visudo -c -q -f "$tmp"; then
+    rm -f "$tmp"
+    die "the generated sudoers rule is invalid"
+  fi
+  install -m 440 "$tmp" "$SUDOERS_FILE"
+  rm -f "$tmp"
+  command -v sudo >/dev/null || warn "sudo is not installed: USB eject and screen restart will fail"
+  ok "sudo rule for USB eject and screen restart: $SUDOERS_FILE"
+
+  render "$SCRIPT_DIR/udev/99-floppyoctotouch-usb.rules.in" >"$UDEV_RULE"
+  chmod 644 "$UDEV_RULE"
+  if systemd_running && command -v udevadm >/dev/null; then
+    udevadm control --reload || true
+  fi
+  ok "USB sticks mounted read-only on /media/usb-<label>: $UDEV_RULE"
+
+  for group in video render input; do
+    if getent group "$group" >/dev/null && [[ " $(id -nG "$FOT_USER") " != *" $group "* ]]; then
+      usermod -aG "$group" "$FOT_USER"
+      info "added $FOT_USER to the $group group"
+    fi
+  done
+
+  systemctl_live daemon-reload
+  systemctl enable -q "$AGENT_UNIT" "$KIOSK_UNIT"
+  # tty1 belongs to the kiosk now; uninstall.sh gives it back to the login prompt.
+  systemctl disable -q getty@tty1.service 2>/dev/null || true
+  ok "services enabled at boot, login prompt on tty1 disabled"
+}
+
+# ------------------------------------------------------------------------------------ display
+BOOT_CHANGED=0
+CMDLINE_TOKEN_ADDED=${FOT_CMDLINE_TOKEN:-}
+
+configure_display() {
+  local dir config cmdline token has_block=0 has_token=0
+  if [ "$SKIP_DISPLAY" = 1 ]; then
+    return
+  fi
+  if ! dir=$(boot_dir); then
+    warn "config.txt not found in /boot/firmware or /boot: display settings skipped"
+    return
+  fi
+  config=$dir/config.txt
+  cmdline=$dir/cmdline.txt
+  token="video=$DISPLAY_OUTPUT:1024x600@60"
+  grep -qxF "$DISPLAY_BEGIN" "$config" && has_block=1
+  if [ ! -f "$cmdline" ] || grep -q "video=$DISPLAY_OUTPUT:" "$cmdline"; then
+    has_token=1
+  fi
+  if [ "$has_block" = 1 ] && [ "$has_token" = 1 ]; then
+    ok "display settings already in $config"
+    return
+  fi
+
+  info "The 7\" HDMI Display (H) needs its 1024x600 mode in $config (manufacturer's lines) and"
+  info "'$token' in $cmdline (KMS driver). Backups are kept; uninstall.sh removes the lines."
+  if ! ask_yes_no "Add the display settings?" y; then
+    info "display settings skipped"
+    return
+  fi
+  if [ "$has_block" = 0 ]; then
+    backup_file "$config"
+    cat >>"$config" <<EOF
+
+$DISPLAY_BEGIN
+# 7" HDMI Display (H), 1024x600 (manufacturer's settings). Removed by FloppyOctoTouch's uninstall.sh.
+[all]
+hdmi_force_hotplug=1
+max_usb_current=1
+hdmi_group=2
+hdmi_mode=87
+hdmi_cvt 1024 600 60 6 0 0 0
+hdmi_drive=1
+$DISPLAY_END
+EOF
+    ok "added the display block to $config"
+  fi
+  if [ "$has_token" = 0 ]; then
+    backup_file "$cmdline"
+    sed -i "1 s|\$| $token|" "$cmdline"
+    CMDLINE_TOKEN_ADDED=$token
+    ok "added '$token' to $cmdline"
+  fi
+  BOOT_CHANGED=1
+}
+
+write_state() {
+  install -d -m 755 "$FOT_ETC"
+  {
+    printf '# FloppyOctoTouch installation state (written by install.sh, read by update.sh and uninstall.sh)\n'
+    printf 'FOT_VERSION=%q\n' "$VERSION"
+    printf 'FOT_USER_SAVED=%q\n' "$FOT_USER"
+    printf 'FOT_LISTEN_LAN=%q\n' "$LISTEN_LAN"
+    printf 'FOT_CMDLINE_TOKEN=%q\n' "$CMDLINE_TOKEN_ADDED"
+  } >"$FOT_STATE"
+  chmod 644 "$FOT_STATE"
+}
+
+# ------------------------------------------------------------------------------------ start
+AGENT_STATE=''
+
+# One line about /local/health; fails while the agent does not answer.
+agent_health() {
+  python3 - "$AGENT_HEALTH_URL" <<'PY'
+import json, sys, urllib.request
+
+try:
+    with urllib.request.urlopen(sys.argv[1], timeout=2) as response:
+        body = json.load(response)
+except Exception:
+    sys.exit(1)
+octoprint = body.get("octoprint", {})
+if octoprint.get("authorized"):
+    print(f"running, OctoPrint {octoprint.get('version')} connected")
+elif octoprint.get("reachable"):
+    print("running, OctoPrint rejects the API key (enter it on the touch screen)")
+else:
+    print("running, OctoPrint not reachable yet")
+PY
+}
+
+start_services() {
+  local i health
+  if ! systemd_running; then
+    warn "systemd is not running (container?): the services start at the next boot"
+    AGENT_STATE='not started (no systemd)'
+    return
+  fi
+  systemctl restart "$AGENT_UNIT"
+  for i in $(seq 1 20); do
+    health=$(agent_health || true)
+    if [ -n "$health" ]; then
+      AGENT_STATE=$health
+      ok "agent $health"
+      return
+    fi
+    [ "$i" = 1 ] && info "waiting for the agent"
+    sleep 1
+  done
+  AGENT_STATE='not answering (see: journalctl -u floppyoctotouch-agent)'
+  warn "the agent does not answer: journalctl -u $AGENT_UNIT -b"
+}
+
+start_kiosk() {
+  if systemd_running; then
+    systemctl restart "$KIOSK_UNIT"
+    ok "kiosk started on the screen"
+  fi
+}
+
+summary() {
+  local ip=''
+  ip=$(hostname -I 2>/dev/null | awk '{print $1}' || true)
+  step "FloppyOctoTouch $VERSION installed"
+  info "user:           $FOT_USER"
+  info "agent:          ${AGENT_STATE:-installed} (http://127.0.0.1:8765)"
+  info "configuration:  $CONFIG_FILE"
+  info "kiosk options:  $FOT_KIOSK_ENV"
+  info "OctoPrint:      $OCTOPRINT_URL${ip:+ (from a PC: http://$ip/)}"
+  info "logs:           journalctl -u $AGENT_UNIT -u $KIOSK_UNIT -b"
+  info "update:         sudo floppyoctotouch-update floppyoctotouch-X.Y.Z.tar.gz"
+  info "uninstall:      sudo floppyoctotouch-uninstall"
+}
+
+main() {
+  parse_args "$@"
+  require_root "$@"
+  require_tty
+  load_state
+  CMDLINE_TOKEN_ADDED=${FOT_CMDLINE_TOKEN:-}
+  [ "$UPDATE" = 1 ] && [ "${FOT_LISTEN_LAN:-0}" = 1 ] && LISTEN_LAN=1
+  find_payload
+
+  step "Checking the system (FloppyOctoTouch $VERSION)"
+  check_system
+  read_octoprint_unit
+  choose_user
+  check_octoprint
+  if [ "$LISTEN_LAN" = 1 ] && [ "$UPDATE" = 0 ]; then
+    warn "--listen-lan: the agent adds the API key to every request, anyone on the network controls the printer"
+    ask_yes_no "Listen on the network anyway?" n || LISTEN_LAN=0
+  fi
+
+  step "Installing packages"
+  install_packages
+
+  step "Installing FloppyOctoTouch into $FOT_PREFIX"
+  install_files
+  install_venv
+
+  step "Configuring the agent"
+  read_saved_key
+  choose_api_key
+  detect_display_output
+  write_config
+
+  step "Installing services, kiosk and USB automount"
+  install_system_files
+
+  if [ "$SKIP_DISPLAY" = 0 ]; then
+    step "Display settings"
+    configure_display
+  fi
+  write_state
+
+  step "Starting"
+  start_services
+  summary
+
+  # Reboot prompt: needed for the display settings, otherwise the kiosk starts right away.
+  if [ "$UPDATE" = 0 ] && [ "$NON_INTERACTIVE" = 0 ] && systemd_running; then
+    local default=n
+    [ "$BOOT_CHANGED" = 1 ] && default=y
+    if ask_yes_no "Reboot now? (needed for the display settings; otherwise the kiosk starts now)" "$default"; then
+      info "rebooting"
+      systemctl reboot
+      return
+    fi
+  fi
+  [ "$BOOT_CHANGED" = 1 ] && info "reboot to apply the display settings: sudo reboot"
+  start_kiosk
+}
+
+main "$@"

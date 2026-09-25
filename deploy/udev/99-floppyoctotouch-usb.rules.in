@@ -1,0 +1,4 @@
+# FloppyOctoTouch: mount USB sticks read-only under /media/usb-<label> (see deploy/usb/usb-mount.sh).
+# Rendered by install.sh, removed by uninstall.sh. The mount itself is done by systemd (systemd-mount).
+ACTION=="add", SUBSYSTEM=="block", ENV{ID_BUS}=="usb", ENV{ID_FS_USAGE}=="filesystem", RUN+="@PREFIX@/deploy/usb/usb-mount.sh add %k @USER@"
+ACTION=="remove", SUBSYSTEM=="block", ENV{ID_BUS}=="usb", RUN+="@PREFIX@/deploy/usb/usb-mount.sh remove %k"

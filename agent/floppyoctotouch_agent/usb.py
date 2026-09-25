@@ -86,7 +86,9 @@ class UsbManager:
                 mount_id = path.name
                 if any(m.id == mount_id for m in found):
                     mount_id = f"{mount_id}-{len(found)}"
-                found.append(Mount(mount_id, path.name, path))
+                # deploy/usb/usb-mount.sh mounts sticks as /media/usb-<label>: show the label.
+                name = path.name.removeprefix("usb-") or path.name
+                found.append(Mount(mount_id, name, path))
         return found
 
     def mount(self, mount_id: str) -> Mount:

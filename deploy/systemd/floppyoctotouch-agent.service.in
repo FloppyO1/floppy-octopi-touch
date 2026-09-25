@@ -1,0 +1,21 @@
+# FloppyOctoTouch agent: serves the dashboard and proxies OctoPrint on 127.0.0.1:8765.
+# Rendered by install.sh (@...@ placeholders); settings live in @HOME@/.config/floppyoctotouch/config.json.
+[Unit]
+Description=FloppyOctoTouch agent (dashboard web app and OctoPrint proxy)
+After=network.target octoprint.service
+
+[Service]
+Type=simple
+User=@USER@
+Group=@GROUP@
+Environment=FOT_CONFIG=@HOME@/.config/floppyoctotouch/config.json
+# wlr-randr (screen off when idle) talks to the cage session of floppyoctotouch-kiosk.service.
+Environment=XDG_RUNTIME_DIR=/run/user/@UID@
+Environment=WAYLAND_DISPLAY=wayland-0
+Environment=PYTHONUNBUFFERED=1
+ExecStart=@PREFIX@/venv/bin/floppyoctotouch-agent
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
