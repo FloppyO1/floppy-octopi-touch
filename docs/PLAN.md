@@ -439,7 +439,7 @@ _Legenda: `[ ]` da fare · `[~]` in corso (interrotta se la trovi a inizio sessi
 - [x] Sessione 1 — Fondamenta, repo e ambiente Docker (2026-09-25, v0.1.0)
 - [x] Sessione 2 — Data layer (2026-09-25, v0.2.0)
 - [x] Sessione 3 — Design system e shell (2026-09-25, v0.3.0)
-- [ ] Sessione 4 — Home, controllo stampa, screensaver, notifiche
+- [x] Sessione 4 — Home, controllo stampa, screensaver, notifiche (2026-09-25, v0.4.0)
 - [ ] Sessione 5 — File
 - [ ] Sessione 6 — Temperature, Movimento, Filamento
 - [ ] Sessione 7 — Terminale, Macro, Livellamento/Mesh
@@ -594,3 +594,57 @@ _(ogni sessione aggiunge qui decisioni prese, deviazioni dal piano, problemi ape
 - Comandi utili: screenshot degli accenti
   `docker compose -f dev/docker-compose.yml run --rm playwright sh -c "npm install && node accents.mjs"`;
   anteprima di un accento: `http://localhost:5173/?accent=amber`.
+
+**Sessione 4 — Home, controllo stampa, screensaver, notifiche (2026-09-25, v0.4.0)**
+- Fatto: Home completa in due viste (`screens/home/`). **In stampa**: anelli hotend/piatto/ventola/job (+ layer
+  solo con DisplayLayerProgress), anteprima miniatura o webcam (pulsante nell'angolo per cambiare, tap = vista
+  grande), barra, trascorso/rimanente/ETA, pulsanti Velocità (M220) e Flusso (M221) che aprono uno slider,
+  anello ventola → slider (M106 S0-255 / M107), pausa e stop con conferma, riprendi. **A riposo**: anelli
+  hotend/piatto/ventola + righe di stato nella stessa card, file selezionato + recenti (max 3, "Stampa" con
+  conferma "piatto libero"), preset di preriscaldo (conferma sopra soglia), Raffredda, Home assi.
+- Screensaver (vista grande: % gigante in stampa, altrimenti orologio + data + temperature) dopo
+  `screensaver.timeoutMin`; spegnimento HDMI opzionale solo senza job (`PUT /local/display`, `wlr-randr` sul Pi,
+  no-op che logga in dev); i dialog aperti vengono annullati. Il tocco di risveglio viene "mangiato" in capture
+  su `window` (pointerdown + sequenza + 400 ms): verificato nello smoke test toccando un preset sotto lo screensaver.
+- Notifiche: popup grande per PrintDone e PrintFailed (`reason: error`) con beep `M300` (default on); pausa e
+  annullamento mostrati solo se non richiesti da questo schermo negli ultimi 60 s (M600, runout, altro client).
+  Con un popup o un host prompt aperti lo screensaver non parte.
+- Agent: proxy `GET /webcam/*` → `webcam_url` (default `http://127.0.0.1:8080`, prefisso tolto come l'haproxy
+  di OctoPi), endpoint `/local/display`; config `webcam_url`, `display_backend` (`wlr-randr`|`none`),
+  `display_output` (default `HDMI-A-1`). 19 pytest (8 nuovi).
+- Dev: servizio `webcam` (MJPEG `testsrc` di ffmpeg dall'immagine OctoPrint, `dev/fake-webcam/server.py`). Lo
+  smoke test carica un G-code breve con `G4`, lo stampa dalla Home e verifica slider, pausa/ripresa senza popup,
+  webcam, popup di fine stampa + M300, screensaver, risveglio, schermo spento; gira anche sulla build dell'agent.
+  83 test vitest; bundle JS 60,6 KB gzip (+ CSS 6,6 KB).
+- Decisioni:
+  - **Ventola/velocità/flusso** letti dal log del terminale (`Send: … M106/M107/M220/M221`, anche le righe del
+    file e di altri client) e dai report Marlin `FR:`/`Flow:`; velocità e flusso partono da 100 % alla
+    connessione, la ventola resta "—" finché non si vede un comando (niente dati inventati). Nessuna query
+    M220/M221 inviata di proposito.
+  - **API webcam 1.11 verificata**: `/api/settings` → `webcam.webcams[0].compat.stream` (default OctoPrint e OctoPi:
+    `/webcam/?action=stream`, relativo → passa dall'agent), `flipH/flipV/rotate90`, `streamRatio`. Un URL manuale
+    nelle impostazioni (`webcam.url`, schema v3) vince; UI per impostarlo in S8.
+  - **DisplayLayerProgress verificato sul sorgente**: layer da messaggio plugin `DisplayLayerProgress-websocket-payload`
+    (`currentLayer`/`totalLayer`, stringhe, "-" se ignoti) e una volta da `GET /plugin/DisplayLayerProgress/values`.
+    Non testato dal vivo (plugin non installato nel container).
+  - Payload eventi verificati nel sorgente di OctoPrint (`printer/standard.py`): `name, path, origin, size`, `time`
+    per Done/Failed, `reason` "error"/"cancelled" per Failed; l'utente dell'azione non basta a distinguere lo schermo
+    locale (stessa API key) → timestamp delle azioni locali (`job.local`).
+  - Conferma su **pausa** e stop, non su riprendi. "Stampa di nuovo" = il file selezionato resta in cima ai recenti.
+  - Schema impostazioni **v3**: `webcam.url`, `home.preview` (`thumbnail`|`webcam`, persistente).
+  - Nuovo `dialogs.slider()` (Stepper + Slider + preset che applicano subito).
+- Deviazioni / scoperte:
+  - Le **miniature** in Home arrivano solo dal plugin Slicer Thumbnails (`thumbnail` del file): l'estrazione
+    dell'agent (`/local/thumbnail`, PNG/JPG/QOI) resta in S5 come da piano → in dev la Home mostra l'icona segnaposto.
+    `core/files.ts` → `thumbnailUrl()` è il punto dove aggiungere il fallback.
+  - Le impostazioni dev avevano l'accento rimasto su indigo (script degli accenti di S3): riportato a teal.
+  - `init.sh`/seed non modificati: il default di OctoPrint ha già lo stream `/webcam/?action=stream`.
+- Problemi aperti / note per le prossime sessioni:
+  - S5: implementare `/local/thumbnail` e usarlo in `thumbnailUrl()` (Home, recenti e browser file).
+  - S8: UI per `webcam.url`, timeout screensaver/spegnimento, beep; la schermata Sistema provvisoria resta.
+  - S10: verificare `wlr-randr` (nome output, `WAYLAND_DISPLAY` nell'unità dell'agent) e che il tocco arrivi a
+    Chromium con HDMI spento (altrimenti fallback evdev nell'agent, vedi sezione 2).
+  - Dopo una riconnessione della stampante la ventola torna "—" (reset voluto: il firmware può essersi riavviato).
+- Comandi utili: `docker compose -f dev/docker-compose.yml stop webcam` (fallback "webcam non raggiungibile");
+  `window.__fot.idle.sleep()` / `sleep('off')` in console per vedere screensaver / schermo spento;
+  `window.__fot.notices.handleEvent('PrintDone', {name: 'x.gcode', time: 60})` per provare il popup.

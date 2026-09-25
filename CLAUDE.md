@@ -33,7 +33,7 @@ then **stop** — never start the next session.
 ## Commands (from the repo root)
 
 ```sh
-docker compose -f dev/docker-compose.yml up -d               # OctoPrint :5000, agent :8765, Vite :5173
+docker compose -f dev/docker-compose.yml up -d               # OctoPrint :5000, agent :8765, Vite :5173, fake webcam
 docker compose -f dev/docker-compose.yml run --rm agent-test     # ruff check + ruff format --check + pytest
 docker compose -f dev/docker-compose.yml run --rm frontend-test  # svelte-check + tsc (node config) + vitest
 docker compose -f dev/docker-compose.yml run --rm build          # frontend/dist
@@ -52,18 +52,24 @@ docker compose -f dev/docker-compose.yml down -v             # wipe OctoPrint/ag
 ## Layout
 
 ```
-agent/floppyoctotouch_agent/   config.py, proxy.py, settings.py, app.py, __main__.py; tests in agent/tests
+agent/floppyoctotouch_agent/   config.py, proxy.py (OctoPrint + /webcam), display.py (wlr-randr), settings.py, app.py,
+                               __main__.py; tests in agent/tests
 frontend/src/lib/api/          http.ts, octoprint.ts (typed REST), agent.ts (/local/*), socket.ts, types.ts
 frontend/src/lib/core/         pure logic + tests: capabilities (M115), hostActions, tempHistory, files,
                                printerState (phase, tone, plugins), settings (schema/defaults/migrations, accent),
-                               format, gauge (ring geometry, heater tone), numpad, keyboard (layouts, editing)
+                               format, gauge (ring geometry, heater tone), numpad, keyboard (layouts, editing),
+                               tune (fan/M220/M221 from the log), layer (DLP), webcam, idle, notices
 frontend/src/lib/stores/       *.svelte.ts singletons (connection, printer/job, temperatures, files, terminal,
-                               events, capabilities, prompt, server, settings, nav, clock) + dataLayer.ts (socket wiring)
+                               events, capabilities, prompt, server, settings, nav, clock, tune, notices, idle)
+                               + dataLayer.ts (socket wiring)
 frontend/src/lib/i18n/         en.json, it.json, index.svelte.ts (t(), setLocale())
 frontend/src/lib/ui/           design system: tokens.css, components (Button, Card, Modal, NumPad, OnScreenKeyboard,
-                               RingGauge, …), dialogs.svelte.ts / toast.svelte.ts services, press.ts, theme.ts, kiosk.ts
-frontend/src/shell/            Shell, Sidebar, StatusBar, ConnectionOverlay, PrinterOverlay, screens.ts (registry)
-frontend/src/screens/          Home (first version), System (temporary), Placeholder; dev/Gallery + dev/Debug (dev only)
+                               RingGauge, SliderDialog, WebcamView, …), dialogs.svelte.ts / toast.svelte.ts services,
+                               press.ts, theme.ts, kiosk.ts
+frontend/src/shell/            Shell, Sidebar, StatusBar, ConnectionOverlay, PrinterOverlay, Screensaver, NoticeDialog,
+                               screens.ts (registry)
+frontend/src/screens/          Home + home/ (JobView, IdleView, Preview, StatusRows, actions.ts), heaterTarget.ts,
+                               System (temporary), Placeholder; dev/Gallery + dev/Debug (dev only)
 frontend/preview.html          1024×600 frame around the app (also in the production build)
 dev/docker-compose.yml         dev stack + tool services; dev/docker/*.Dockerfile
 dev/octoprint/                 seed config.yaml + init.sh for the OctoPrint volume
@@ -71,6 +77,7 @@ dev/e2e/screenshot.mjs         Playwright smoke test/screenshots (own package.js
                                accents.mjs = screenshots of every accent variant
 dev/sample-gcode/              samples with PrusaSlicer PNG/QOI and OrcaSlicer thumbnails (dev/tools/make_sample_gcode.py)
 dev/fake-usb/                  mounted read-only in the agent as /media/usb0
+dev/fake-webcam/server.py      MJPEG test pattern (ffmpeg testsrc) on :8080, service `webcam`
 deploy/, scripts/              placeholders (session 9)
 ```
 
@@ -104,11 +111,23 @@ deploy/, scripts/              placeholders (session 9)
   `docker compose -f dev/docker-compose.yml build agent` (otherwise `/local/health` reports the old version).
 - Screenshots can fail with `EINVAL` on the Windows bind mount when the PNG is open in the IDE: just rerun.
 - In the Bash tool, long multi-file heredocs can fail to parse: prefer the Write tool for new files.
+- Settings are saved 400 ms after `settings.update()`: a Playwright step that changes them and then navigates
+  must `await window.__fot.settings.flush()`, or the change (e.g. a 3 s screensaver timeout) is lost or, worse,
+  left behind for the next run. Dev settings persist in the `agent-data` volume.
+- Dialogs keep their DOM during the outro transition: in Playwright wait for `[data-testid=…]` to be detached
+  before reopening the same dialog, or locators match two of them.
+- The idle store listens on `window` in the capture phase and swallows the wake-up tap: to trigger the
+  screensaver in tests use `window.__fot.idle.sleep()` / `sleep('off')`, any click wakes it.
+- OctoPrint logs every sent line as `Send: …` in `current.logs`; fan/feed rate/flow come only from there
+  (`core/tune.ts`). The Virtual Printer prints the samples in about a minute and supports `G4` dwells.
+- An `<img>` with `height: 100%` inside an auto-sized grid row ignores the height: position it absolutely
+  (see `WebcamView`).
 
 ## Current state
 
-v0.3.0 (session 3): design system (tokens, Inter + Lucide bundled, components, dialogs/toast services),
-app shell (sidebar, status bar, connection/printer overlays, host prompt dialog), first Home with ring gauges,
-accent teal by default (amber/indigo selectable, `accent` setting), `?kiosk=1` hardening, dev pages
-`/ui-gallery` and `/debug`. Next: session 4 (Home, print control, screensaver, notifications).
+v0.4.0 (session 4): complete Home (job view with thumbnail/webcam preview, speed/flow/fan sliders, confirmed
+pause/stop; idle view with recent files, preheat presets, cooldown, homing), overrides tracked from the log,
+screensaver + optional HDMI off (`/local/display`) with wake-up touch swallowing, print notices + M300 beep,
+agent `/webcam` proxy, fake webcam in dev, settings schema v3. Design system and shell from session 3 (accent
+teal). Next: session 5 (Files: browser, thumbnails from the agent, SD card, USB stick).
 See `docs/PLAN.md` for details and notes between sessions.

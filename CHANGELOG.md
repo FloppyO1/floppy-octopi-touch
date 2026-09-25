@@ -6,6 +6,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-09-25
+
+### Added
+- Home screen, complete: job view with the file thumbnail or the webcam (switchable, tap to enlarge), progress,
+  elapsed/left/ETA, live speed (M220) and flow (M221) sliders, fan (M106/M107) slider from the fan gauge,
+  pause (confirmed), resume, stop (confirmed); layer gauge with the DisplayLayerProgress plugin; idle view with
+  the selected and recent files (Print asks to check that the bed is clear), preheat presets, cooldown and homing.
+- Fan, feed rate and flow are read from the commands in the terminal log (G-code files and other clients
+  included) and from Marlin's `FR:`/`Flow:` reports.
+- Screensaver after the configured timeout: big progress view while printing, clock, date and temperatures
+  otherwise. The touch that wakes it up is swallowed and never presses a button underneath.
+- Optional screen off when idle (never while printing), through the new agent endpoint `/local/display`
+  (`wlr-randr` on the Pi, a logging no-op in development); a touch turns the screen back on.
+- Big notices for finished and failed prints (with the `M300` beep, default on) and for pauses or cancels
+  made elsewhere (printer, filament change, another client).
+- Agent: `/webcam/*` proxy to camera-streamer (`webcam_url`), so OctoPrint's default relative stream URL works.
+- Slider dialog (`dialogs.slider()`), `WebcamView` component.
+- Settings schema v3: manual webcam URL (`webcam.url`) and Home preview choice (`home.preview`).
+- Development: fake MJPEG webcam service; the smoke test now prints a short job from the Home (overrides,
+  pause/resume, webcam, end-of-print notice and beep) and checks screensaver, wake-up touch and screen off.
+
 ## [0.3.0] - 2026-09-25
 
 ### Added
