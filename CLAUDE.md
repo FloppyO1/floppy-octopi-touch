@@ -53,31 +53,34 @@ docker compose -f dev/docker-compose.yml down -v             # wipe OctoPrint/ag
 
 ```
 agent/floppyoctotouch_agent/   config.py, proxy.py (OctoPrint + /webcam), display.py (wlr-randr), settings.py, app.py,
+                               thumbnails.py (G-code thumbnails + disk cache), usb.py (sticks, import, watcher),
+                               files.py (/local/thumbnail, /local/usb*, /local/events SSE),
                                __main__.py; tests in agent/tests
 frontend/src/lib/api/          http.ts, octoprint.ts (typed REST), agent.ts (/local/*), socket.ts, types.ts
 frontend/src/lib/core/         pure logic + tests: capabilities (M115), hostActions, tempHistory, files,
                                printerState (phase, tone, plugins), settings (schema/defaults/migrations, accent),
                                format, gauge (ring geometry, heater tone), numpad, keyboard (layouts, editing),
                                tune (fan/M220/M221 from the log), layer (DLP), webcam, idle, notices
-frontend/src/lib/stores/       *.svelte.ts singletons (connection, printer/job, temperatures, files, terminal,
+frontend/src/lib/stores/       *.svelte.ts singletons (connection, printer/job, temperatures, files, usb, terminal,
                                events, capabilities, prompt, server, settings, nav, clock, tune, notices, idle)
                                + dataLayer.ts (socket wiring)
 frontend/src/lib/i18n/         en.json, it.json, index.svelte.ts (t(), setLocale())
-frontend/src/lib/ui/           design system: tokens.css, components (Button, Card, Modal, NumPad, OnScreenKeyboard,
+frontend/src/lib/ui/           design system: tokens.css, components (Button, Card, Modal, NumPad, OnScreenKeyboard, Thumb,
                                RingGauge, SliderDialog, WebcamView, …), dialogs.svelte.ts / toast.svelte.ts services,
                                press.ts, theme.ts, kiosk.ts
 frontend/src/shell/            Shell, Sidebar, StatusBar, ConnectionOverlay, PrinterOverlay, Screensaver, NoticeDialog,
                                screens.ts (registry)
-frontend/src/screens/          Home + home/ (JobView, IdleView, Preview, StatusRows, actions.ts), heaterTarget.ts,
-                               System (temporary), Placeholder; dev/Gallery + dev/Debug (dev only)
+frontend/src/screens/          Home + home/ (JobView, IdleView, Preview, StatusRows, actions.ts), Files + files/
+                               (view state, items, FileGrid, FileDetail, UsbDetail, ImportProgress, actions.ts),
+                               heaterTarget.ts, System (temporary), Placeholder; dev/Gallery + dev/Debug (dev only)
 frontend/preview.html          1024×600 frame around the app (also in the production build)
 dev/docker-compose.yml         dev stack + tool services; dev/docker/*.Dockerfile
 dev/octoprint/                 seed config.yaml + init.sh for the OctoPrint volume
 dev/e2e/screenshot.mjs         Playwright smoke test/screenshots (own package.json, Playwright 1.63.0);
                                accents.mjs = screenshots of every accent variant
 dev/sample-gcode/              samples with PrusaSlicer PNG/QOI and OrcaSlicer thumbnails (dev/tools/make_sample_gcode.py)
-                               + 3dbenchy_prusaslicer.gcode (real export, Tatara A8 profile, no thumbnail, ~1 h)
-dev/fake-usb/                  mounted read-only in the agent as /media/usb0
+                               + 3dbenchy_prusaslicer.gcode (real export, Tatara A8 profile, 300x300 PNG, ~45 min)
+dev/fake-usb/                  mounted read-only in the agent as /media/usb0, writable in playwright (/fake-usb)
 dev/fake-webcam/server.py      MJPEG test pattern (ffmpeg testsrc) on :8080, service `webcam`
 deploy/, scripts/              placeholders (session 9)
 ```
@@ -123,12 +126,19 @@ deploy/, scripts/              placeholders (session 9)
   (`core/tune.ts`). The Virtual Printer prints the samples in about a minute and supports `G4` dwells.
 - An `<img>` with `height: 100%` inside an auto-sized grid row ignores the height: position it absolutely
   (see `WebcamView`).
+- Files copied into OctoPrint's uploads while it runs (e.g. by `init.sh` after a sample changed) are not analysed
+  until a restart, and `init.sh` never overwrites: replace a sample by deleting it and uploading it through
+  `/api/files/local` (then OctoPrint analyses it at once).
+- Fake USB stick in dev: the agent sees `dev/fake-usb` read-only; "Eject" only hides it until the folder mtime
+  changes (adding/removing a file = a new insertion event). Mount changes are polled every 2 s (no inotify).
+- The agent reads thumbnails straight from OctoPrint's uploads (`FOT_UPLOADS_DIR`, volume mounted `:ro`); the
+  disk cache is keyed by path + size + mtime, so a re-uploaded file gets a fresh thumbnail.
 
 ## Current state
 
-v0.4.0 (session 4): complete Home (job view with thumbnail/webcam preview, speed/flow/fan sliders, confirmed
-pause/stop; idle view with recent files, preheat presets, cooldown, homing), overrides tracked from the log,
-screensaver + optional HDMI off (`/local/display`) with wake-up touch swallowing, print notices + M300 beep,
-agent `/webcam` proxy, fake webcam in dev, settings schema v3. Design system and shell from session 3 (accent
-teal). Next: session 5 (Files: browser, thumbnails from the agent, SD card, USB stick).
+v0.5.0 (session 5): Files screen (local storage with folders/sort/grid-list/search, detail with print/select/
+delete, SD card tab, USB stick tab with import progress and eject), agent thumbnail extraction (PNG/JPG/QOI,
+disk cache) used everywhere via `thumbnailUrl()`, USB endpoints + SSE `/local/events`, optional screensaver
+thumbnail, settings schema v4. Home, screensaver, notices from session 4; design system and shell from session 3
+(accent teal). Next: session 6 (Temperatures, Movement, Filament).
 See `docs/PLAN.md` for details and notes between sessions.

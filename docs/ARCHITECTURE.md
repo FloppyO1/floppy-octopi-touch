@@ -11,7 +11,7 @@
 │   • reverse proxy /api /sockjs /plugin /downloads ──────────► OctoPrint 127.0.0.1:5000 │
 │     (adds X-Api-Key, relays WebSockets)                                                │
 │   • /webcam/* ──► camera-streamer 127.0.0.1:8080 (prefix removed, no API key)          │
-│   • /local/* endpoints (health, settings, display; later system, thumbnails, USB)      │
+│   • /local/* endpoints (health, settings, display, thumbnails, USB, events)            │
 └────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -37,6 +37,9 @@ Package `agent/floppyoctotouch_agent`:
 | `config.py` | `Config` dataclass; JSON file (`FOT_CONFIG`, default `~/.config/floppyoctotouch/config.json`) overridden by `FOT_*` env vars |
 | `proxy.py` | `OctoPrintProxy`: streams HTTP requests/responses (bodies untouched, `Content-Encoding` preserved), bridges WebSocket upgrades; strips client `X-Api-Key`, `Authorization`, `Origin`, `Referer` and hop-by-hop headers. `WebcamProxy`: `GET /webcam/<path>` → `<webcam_url>/<path>` (what OctoPi's haproxy does), streams endless MJPEG responses until the browser closes them |
 | `display.py` | `Display`: HDMI output power with `wlr-randr --output <display_output> --on/--off` (the cage session's Wayland display), or backend `none` (only logs; development) |
+| `thumbnails.py` | `ThumbnailScanner` (line by line, stops at the first G-code command, largest valid image wins), QOI decoder and PNG encoder (standard library only), `ThumbnailCache` on disk (`<data_dir>/thumbnails/<sha1>.png\|.jpg`, `.none` for files without a thumbnail, 1000 entries, one extraction at a time) |
+| `usb.py` | `UsbManager`: mounts matching `usb_roots`, G-code listing (depth 5, 1000 files, system folders skipped), `resolve()` that confines every path to its mount (no `..`, no symlinks out), eject command; streamed multipart body with a known length for the import; `EventHub` + `UsbWatcher` (mount polling every 2 s) |
+| `files.py` | `FilesApi`: the thumbnail, USB and event endpoints, `ApiError` → JSON `{error, detail}` middleware |
 | `settings.py` | `SettingsStore`: one JSON document (`<data_dir>/settings.json`), defaults when missing or corrupted, atomic writes, 256 KiB limit |
 | `app.py` | application factory and `/local/*` handlers |
 | `__main__.py` | CLI (`--host`, `--port`, `--listen-lan`) |
@@ -50,6 +53,12 @@ Package `agent/floppyoctotouch_agent`:
 | PUT | `/local/settings` | replace the settings document (JSON object) |
 | GET | `/local/display` | `{on, backend, output}` |
 | PUT | `/local/display` | `{"on": false}` / `{"on": true}` switches the HDMI output; 503 with `detail` if `wlr-randr` fails |
+| GET | `/local/thumbnail?path=<local path>&v=<date>` | thumbnail of a file of OctoPrint's local storage as PNG/JPEG (cached; `v` busts the browser cache), 404 `no_thumbnail`; read from `uploads_dir`, or streamed from `/downloads/files/local/…` when that folder is not readable |
+| GET | `/local/usb` | `{mounts: [{id, name}], files: [{mount, path, name, size, date}]}` |
+| GET | `/local/usb/thumbnail?mount=<id>&path=<path>` | thumbnail of a file on a stick |
+| POST | `/local/usb/import` | `{mount, path, folder}` → uploads the file to `/api/files/local` (so OctoPrint analyses it) and streams NDJSON: `{sent, total}` every 250 ms, then `{done, name, path}` or `{error}`; closing the request cancels the upload; 413 above `usb_max_file_mb` |
+| POST | `/local/usb/eject` | `{mount}` → runs `usb_eject_command` (`{path}` = mount point) |
+| GET | `/local/events` | Server-Sent Events: `usb` with the current mounts on connection and on every change, pings every 15 s |
 | * | `/api/**`, `/sockjs/**`, `/plugin/**`, `/downloads/**` | proxied to OctoPrint |
 | GET | `/webcam/**` | proxied to the webcam streamer (`webcam_url`, default `http://127.0.0.1:8080`); 502 if unreachable |
 | GET | everything else | static files from `static_dir`, `index.html` fallback for extension-less paths (never for `/local/*`, which answers 404) |
@@ -66,12 +75,12 @@ icons are bundled.
 | Folder | Content |
 |---|---|
 | `src/lib/api/` | transport: `http.ts` (JSON helpers, path encoding), `octoprint.ts` (typed REST client), `agent.ts` (`/local/*`), `socket.ts` (push API), `types.ts` (OctoPrint 1.11 types) |
-| `src/lib/core/` | pure, unit-tested logic: M115 capabilities, host action parser, temperature ring buffer, file tree helpers (recent files, thumbnails), printer phase/tone and plugin detection, settings schema/migrations, formatting, gauge geometry, NumPad entry, keyboard layouts, overrides from the log (`tune`), DisplayLayerProgress layers (`layer`), webcam source (`webcam`), idle levels (`idle`), print notices (`notices`) |
+| `src/lib/core/` | pure, unit-tested logic: M115 capabilities, host action parser, temperature ring buffer, file tree helpers (recent files, thumbnails, sort, search, breadcrumbs), printer phase/tone and plugin detection, settings schema/migrations, formatting, gauge geometry, NumPad entry, keyboard layouts, overrides from the log (`tune`), DisplayLayerProgress layers (`layer`), webcam source (`webcam`), idle levels (`idle`), print notices (`notices`) |
 | `src/lib/stores/` | Svelte 5 stores (classes with `$state`/`$derived`, one singleton each) and `dataLayer.ts`, which wires the socket to them |
 | `src/lib/i18n/` | `en.json`, `it.json`, `t()`, `setLocale()` (default English) |
 | `src/lib/ui/` | design system: tokens, components, `dialogs`/`toast` services, `pressable` attachment, theme (accent) and kiosk helpers |
 | `src/shell/` | app shell: sidebar, status bar, screen registry, connection and printer overlays, screensaver, print notice dialog |
-| `src/screens/` | screens (`Home` with its parts in `home/`, temporary `System`, `Placeholder`), shared `heaterTarget.ts`, dev-only pages in `dev/` (`Gallery`, `Debug`) |
+| `src/screens/` | screens (`Home` with its parts in `home/`, `Files` with its parts in `files/`, temporary `System`, `Placeholder`), shared `heaterTarget.ts`, dev-only pages in `dev/` (`Gallery`, `Debug`) |
 
 OctoPrint returns absolute `refs` URLs built from its own host (e.g. `http://octoprint:5000/...` in Docker):
 the client never uses them and always builds relative paths.
@@ -113,8 +122,7 @@ the client never uses them and always builds relative paths.
   Marlin's `FR:` / `Flow:` reports are parsed too. Feed rate and flow start at 100 % on (re)connection, the fan
   is unknown (`—`) until a command is seen. Sliders send `M220`/`M221` through the REST printhead/tool commands
   and `M106 S<0-255>` / `M107`.
-- **Preview**: the file's thumbnail (Slicer Thumbnails plugin field for now; the agent's own extraction comes in
-  session 5) or the webcam; the choice is the `home.preview` setting. The webcam is the first entry of
+- **Preview**: the file's thumbnail (see Files) or the webcam; the choice is the `home.preview` setting. The webcam is the first entry of
   `/api/settings` → `webcam.webcams[]` (`compat.stream`, flip/rotate) unless `webcam.url` is set in the dashboard
   settings. On OctoPi the stream URL is the relative `/webcam/?action=stream`, served by the agent's proxy.
   `WebcamView` keeps the MJPEG connection only while it is mounted and the UI is awake, and retries every 10 s.
@@ -130,6 +138,32 @@ the client never uses them and always builds relative paths.
   `PrintFailed` (`reason: error`) open a big popup and send the `printDone.beepGcode` (`M300`, default on);
   `PrintFailed` with `reason: cancelled` and `PrintPaused` are shown only when they were not requested from this
   screen in the last 60 s (`job.local`). `PrintResumed` closes a pause notice, `PrintStarted` any notice.
+- **Screensaver thumbnail**: with `screensaver.showThumbnail` the printing view puts the file thumbnail (~220 px)
+  left of the percentage; without a thumbnail the layout stays the plain one.
+
+### Files
+
+- **Screen** (`src/screens/Files.svelte`, parts in `files/`): tabs Local / SD card (only when OctoPrint reports SD
+  support and the firmware/override does not say otherwise, `core/files.ts` → `sdAvailable()`) / USB stick.
+  `files/view.svelte.ts` keeps tab, folder, search and open detail across navigation. `items.ts` maps OctoPrint
+  entries and stick files to one `Item` shape sorted with `compareItems()` (folders first). Sort key, direction
+  and grid/list view are settings (`files.*`, schema v4).
+- **Search** uses `dialogs.text()` (on-screen keyboard) and matches the whole path in every folder, ignoring case
+  and accents (`searchFiles()` / `matchesQuery()`).
+- **Detail** (`FileDetail`): slicer analysis from `gcodeAnalysis` (time, filament, dimensions), last print from
+  `prints.last`; Print (bed-clear confirmation, shared with the Home), Select, Delete (confirmation). SD card
+  files have no thumbnail or analysis; SD commands (`M21`/`M20`/`M22` through `POST /api/printer/sd`) are
+  disabled while printing.
+- **Thumbnails**: `thumbnailUrl()` returns the Slicer Thumbnails plugin URL when the entry has one, otherwise
+  `/local/thumbnail?path=…&v=<date>` for local G-code files. `Thumb.svelte` falls back to an icon on 404, so
+  Home, recent files, the screensaver and the browser all share the same logic.
+- **USB** (`stores/usb.svelte.ts`): subscribes to `/local/events` (`EventSource`, reconnects by itself); each
+  `usb` event replaces the mounts and reloads `/local/usb`; mounts appearing/disappearing after the first event
+  become `usb:inserted` / `usb:removed` on the events bus (toasts in `App.svelte`). The import reads the NDJSON
+  stream (`ImportProgress` dialog with cancel), asks before overwriting a file with the same name, then opens
+  the detail of the local copy.
+- **Live updates**: `UpdatedFiles`, `FileAdded`, `FileRemoved`, `FolderAdded`, `FolderRemoved`, `FileDeselected`
+  and `MetadataAnalysisFinished` reload the file list (debounced).
 
 ### Live updates (push API)
 
@@ -147,11 +181,12 @@ the client never uses them and always builds relative paths.
 `startDataLayer()` loads the settings from the agent, polls `/local/health` every 5 s until OctoPrint is reachable
 and authorised, then opens the socket. Each time the socket is authenticated it reloads over REST what the socket
 does not carry: `/api/connection`, `/api/settings`, `/api/printerprofiles`, `/api/files?recursive=true` (local
-and SD card in one call) and `/local/usb`. After that REST is only used on events that announce a change:
+and SD card in one call); the agent's `/local/events` stream starts at once and drives the `usb` store.
+After that REST is only used on events that announce a change:
 
 | Event | Reaction |
 |---|---|
-| `UpdatedFiles`, `FileAdded`, `FileRemoved`, `FolderAdded`, `FolderRemoved` | file list reload (debounced 500 ms) |
+| `UpdatedFiles`, `FileAdded`, `FileRemoved`, `FolderAdded`, `FolderRemoved`, `FileDeselected`, `MetadataAnalysisFinished` | file list reload (debounced 500 ms) |
 | `Connected` | reload connection and printer profile, reset the overrides; OctoPrint sends M115 itself |
 | `Disconnected` | reset firmware capabilities, host prompts and overrides |
 | `PrintDone`, `PrintFailed`, `PrintPaused`, `PrintResumed`, `PrintCancelled`, `PrintStarted` | print notices |
@@ -166,7 +201,8 @@ and SD card in one call) and `/local/usb`. After that REST is only used on event
 | `terminal` | `history.logs` / `current.logs` | last 1000 lines |
 | `capabilities` | `Cap:` lines of the M115 answer in the log + settings overrides | sends M115 once if the report is unknown |
 | `prompt` | `//action:` lines of live logs (not `history`, to avoid replaying answered prompts) | answers via the Action Command Prompt plugin when the firmware reported `PROMPT_SUPPORT`, else `M876 S<n>` |
-| `files` | `/api/files`, `/local/usb` | USB status `unavailable` until the agent endpoint exists (session 5) |
+| `files` | `/api/files` | local tree and SD card list, `find()`, `thumbnailFor()`, select/delete, SD init/refresh/release |
+| `usb` | `/local/events`, `/local/usb` | mounts, stick files, import progress |
 | `server` | `/api/settings`, `/api/printerprofiles`, `plugin` messages | plugin detection from the `plugins` keys of the settings; `webcam` source; DisplayLayerProgress values (`/plugin/DisplayLayerProgress/values` once, then the `DisplayLayerProgress-websocket-payload` messages) |
 | `tune` | `Send:`/`Recv:` log lines | fan %, feed rate %, flow % (see Home) |
 | `notices` | print events | current big notice, print-done beep |
@@ -187,7 +223,7 @@ computed `$derived`; stores that are read through such checks use `$state.raw` a
 | `octoprint-init` | `octoprint/octoprint:1.11.8` | one-shot: merges `dev/octoprint/config.yaml` into the image's config (first start only), copies `dev/sample-gcode` (plus `examples/` folder and a virtual SD file), creates the admin user, registers `OCTOPRINT_API_KEY` as an application key |
 | `octoprint` | `octoprint/octoprint:1.11.8` | OctoPrint on port 5000 (haproxy on 80 is not used), Virtual Printer with SD, volume `octoprint-data` |
 | `webcam` | `octoprint/octoprint:1.11.8` (for its ffmpeg) | `dev/fake-webcam/server.py`: MJPEG test pattern on 8080 (`/?action=stream`, `/?action=snapshot`) |
-| `agent` | `dev/docker/agent.Dockerfile` (Python 3.11) | source mounted, hot reload with `watchfiles` (polling), `dev/fake-usb` mounted as `/media/usb0`, webcam → `http://webcam:8080`, display backend `none` |
+| `agent` | `dev/docker/agent.Dockerfile` (Python 3.11) | source mounted, hot reload with `watchfiles` (polling), `dev/fake-usb` mounted as `/media/usb0` (eject command `none`), OctoPrint's volume read-only for the thumbnails (`FOT_UPLOADS_DIR`), webcam → `http://webcam:8080`, display backend `none` |
 | `frontend` | `dev/docker/frontend.Dockerfile` (Node 24) | Vite dev server on 5173 proxying to the agent; `node_modules` in a named volume |
 | `agent-test`, `frontend-test`, `build`, `playwright`, `shellcheck` | profile `tools` | run on demand with `docker compose run --rm <service>` |
 

@@ -6,6 +6,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-09-25
+
+### Added
+- Files screen with three sources as tabs: OctoPrint local storage (folders with breadcrumb, sort by name, date
+  or size, thumbnail grid or compact list, both remembered), the printer's SD card (print, delete, init, read,
+  release; hidden when the printer has no card) and a USB stick plugged into the Pi.
+- File detail: large thumbnail, estimated time, filament, dimensions, size, upload date, last print; Print,
+  Select and Delete (confirmed). The list follows OctoPrint's file events and the end of the slicer analysis.
+- Search across every folder through the on-screen keyboard (accent-insensitive).
+- Agent: `GET /local/thumbnail` extracts PNG, JPG and QOI thumbnails from PrusaSlicer/OrcaSlicer G-code headers
+  (QOI converted to PNG, standard library only), reading OctoPrint's uploads folder (`uploads_dir`) or, if not
+  readable, its download; results cached on disk. Thumbnails now show everywhere (Home, recent files, Files)
+  without the Slicer Thumbnails plugin.
+- Agent: USB sticks under `usb_roots` (default `/media/usb*`): `GET /local/usb`, `/local/usb/thumbnail`,
+  `POST /local/usb/import` (upload into OctoPrint's local storage with NDJSON progress, cancellable,
+  `usb_max_file_mb` limit), `POST /local/usb/eject` (`usb_eject_command`); every path is confined to its mount
+  (no traversal, no symlinks out). `GET /local/events` pushes stick insertion/removal (Server-Sent Events), shown
+  as toasts.
+- Optional file thumbnail next to the percentage on the printing screensaver (`screensaver.showThumbnail`,
+  default off, temporary switch on the System screen).
+- Settings schema v4: `files.sort`, `files.direction`, `files.view`, `screensaver.showThumbnail`.
+- Development: the fake USB stick is writable by the Playwright container; the smoke test covers browsing,
+  sorting, search, detail, delete, SD card, USB import/eject/insertion and the screensaver thumbnail.
+
+### Changed
+- `dev/sample-gcode/3dbenchy_prusaslicer.gcode` re-exported with a 300×300 PNG thumbnail.
+
 ## [0.4.0] - 2026-09-25
 
 ### Added

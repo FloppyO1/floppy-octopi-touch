@@ -450,7 +450,7 @@ _Legenda: `[ ]` da fare · `[~]` in corso (interrotta se la trovi a inizio sessi
 - [x] Sessione 2 — Data layer (2026-09-25, v0.2.0)
 - [x] Sessione 3 — Design system e shell (2026-09-25, v0.3.0)
 - [x] Sessione 4 — Home, controllo stampa, screensaver, notifiche (2026-09-25, v0.4.0)
-- [ ] Sessione 5 — File
+- [x] Sessione 5 — File (2026-09-25, v0.5.0)
 - [ ] Sessione 6 — Temperature, Movimento, Filamento
 - [ ] Sessione 7 — Terminale, Macro, Livellamento/Mesh
 - [ ] Sessione 8 — Sistema e Impostazioni
@@ -667,3 +667,52 @@ _(ogni sessione aggiunge qui decisioni prese, deviazioni dal piano, problemi ape
   `dev/sample-gcode/3dbenchy_prusaslicer.gcode`: viene caricato in OctoPrint da `octoprint-init` come gli altri.
   Non contiene miniature (`; thumbnails =` vuoto): in PrusaSlicer vanno abilitate in Impostazioni stampante →
   Generale → Firmware → "Miniature G-code" (es. `16x16/PNG, 220x124/PNG`).
+
+**Sessione 5 — File (2026-09-25, v0.5.0)**
+- Sessione interrotta una volta (crediti) e ripresa nello stesso giorno: il lavoro era tutto nel working tree.
+- Fatto (agent): `thumbnails.py` (scanner dell'header G-code PNG/JPG/QOI, si ferma al primo comando; QOI→PNG
+  solo stdlib; cache su disco `data_dir/thumbnails` con `.none` per i file senza miniatura, 1000 voci, una
+  estrazione alla volta), `usb.py` (`UsbManager` su `usb_roots` glob, default `/media/usb*`, anti
+  path-traversal/symlink, comando di espulsione, upload multipart con Content-Length; `EventHub` + `UsbWatcher`
+  polling 2 s), `files.py` (`GET /local/thumbnail`, `/local/usb`, `/local/usb/thumbnail`, `POST /local/usb/import`
+  con avanzamento NDJSON annullabile, `POST /local/usb/eject`, `GET /local/events` SSE). Config nuova:
+  `uploads_dir`, `usb_eject_command`, `usb_max_file_mb` (+ env `FOT_*`). 56 pytest.
+- Fatto (frontend): schermata File con tab Local / SD / USB, cartelle con breadcrumb, ordinamento nome/data/
+  dimensione e vista griglia/elenco persistenti (settings **v4**), ricerca in tutte le cartelle con la tastiera
+  a schermo (senza accenti/maiuscole), dettaglio (miniatura grande, tempo, filamento, dimensioni, ultima stampa;
+  Stampa/Seleziona/Elimina con conferma), comandi SD (init/lettura/rilascio, disabilitati in stampa), import da
+  USB con scelta della cartella, conferma di sovrascrittura, dialog di avanzamento e apertura della copia locale,
+  espulsione, toast di inserimento/rimozione chiavetta. `thumbnailUrl()` usa il fallback dell'agent, `Thumb.svelte`
+  mostra l'icona su 404: miniature in Home, recenti, File e screensaver (opzione `screensaver.showThumbnail`,
+  interruttore provvisorio in Sistema). 92 vitest; bundle JS 71,1 KB gzip (+ CSS 7,6 KB).
+- Smoke test: nuova `filesScreen()` (cartelle, ordinamenti, elenco, ricerca con tastiera fisica + Enter, dettaglio
+  del benchy, eliminazione, SD, USB: file scritto in `/fake-usb`, miniatura, destinazione `examples`, import,
+  dialog di avanzamento simulato, espulsione, reinserimento via SSE) e screensaver in stampa con/senza miniatura.
+  Verde sia su Vite sia sulla build servita dall'agent. Screenshot controllati; `docs/images/files-v0.5.0.png`.
+- Decisioni:
+  - Estrazione miniature leggendo direttamente gli upload di OctoPrint (sul Pi stesso utente/permessi); se la
+    cartella non è leggibile, fallback sul download HTTP via OctoPrint. Vince l'immagine più grande valida.
+  - Aggiornamenti USB con **SSE** dall'agent (niente WebSocket locale né polling dal browser); il polling dei
+    mount resta nell'agent (2 s, costo trascurabile) finché S9 non sceglie udev/systemd-mount.
+  - L'import passa sempre da `/api/files/local` (OctoPrint analizza il file); niente upload verso SD in v1.
+  - In dev l'espulsione (`FOT_USB_EJECT_COMMAND=none`) nasconde la chiavetta finché cambia l'mtime della cartella.
+  - `MetadataAnalysisFinished` aggiorna l'elenco (tempo/filamento compaiono appena finisce l'analisi).
+- Deviazioni / scoperte:
+  - Il benchy riesportato dall'utente ha una miniatura PNG 300×300: il test pytest ora ne verifica l'estrazione e
+    che la scansione si fermi al primo comando; il caso "nessuna miniatura" usa un G-code generato nel test.
+    La copia in OctoPrint è stata sostituita con DELETE + upload via API (analisi immediata: 45:04, 3,84 m).
+  - Stima reale del benchy ~45 min (non ~1 h come indicato prima).
+  - Errore di processo nella prima parte della sessione: Python dell'host usato per un'edit di testo e per leggere
+    JSON. Non rifarlo (solo Docker).
+- Problemi aperti / note per le prossime sessioni:
+  - S9: meccanismo di mount delle chiavette (udev + `systemd-mount` in sola lettura sotto `/media/usb*`) e permessi
+    per `systemd-mount --umount` dall'utente dell'agent (polkit/sudoers).
+  - S8: interruttore definitivo `screensaver.showThumbnail` (oggi nella schermata Sistema provvisoria).
+  - Nel log del browser, durante il test di disconnessione/riconnessione, a volte compare un 409 su
+    `POST /api/printer/command`: è l'M115 di `capabilities.requestIfUnknown()` (S2) inviato quando OctoPrint non è
+    ancora operativo; innocuo (viene ritentato), da rendere più robusto quando si tocca quel codice.
+  - In dev `dev/fake-usb/` contiene file di prova locali ignorati da git (`Logo è prova.gcode`, `parts/…`).
+- Comandi utili: nuova miniatura/analisi di un campione in OctoPrint:
+  `curl -X DELETE http://127.0.0.1:8765/api/files/local/<file>` poi
+  `curl -F file=@dev/sample-gcode/<file> http://127.0.0.1:8765/api/files/local`;
+  `curl "http://127.0.0.1:8765/local/thumbnail?path=<file>" -o x.png` per provare l'estrazione.

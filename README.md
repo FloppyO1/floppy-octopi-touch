@@ -3,12 +3,15 @@
 A touch-first dashboard for [OctoPrint](https://octoprint.org/), designed for a Raspberry Pi 4 running
 OctoPi with a 7" 1024×600 HDMI touch screen, shown full screen in a Chromium kiosk.
 
-> **Status: early development (v0.4.0).** Development environment, local agent, data layer, design system, app
-> shell and the Home screen (print control, live tuning, webcam, screensaver, print notices) are in place; the
-> other screens are placeholders. The screens are being built session by session, see
-> [`docs/PLAN.md`](docs/PLAN.md) (Italian) and [`CHANGELOG.md`](CHANGELOG.md).
+> **Status: early development (v0.5.0).** Development environment, local agent, data layer, design system, app
+> shell, the Home screen (print control, live tuning, webcam, screensaver, print notices) and the Files screen
+> (local storage, SD card, USB stick, slicer thumbnails) are in place; the other screens are placeholders. The
+> screens are being built session by session, see [`docs/PLAN.md`](docs/PLAN.md) (Italian) and
+> [`CHANGELOG.md`](CHANGELOG.md).
 
 ![Home screen at 1024×600 while printing](docs/images/home-v0.4.0.png)
+
+![Files screen with slicer thumbnails](docs/images/files-v0.5.0.png)
 
 ## Features
 
@@ -17,15 +20,19 @@ Available now:
 - Home screen with ring gauges (hotend, bed, fan, job, layer with DisplayLayerProgress), progress, times and ETA,
   pause/resume/stop with confirmation, live speed (M220), flow (M221) and fan (M106/M107) sliders, the file
   thumbnail or the webcam; when idle, the recent files ready to print, preheat presets, cooldown and homing.
-- Screensaver with a large progress/clock view and optional HDMI power-off when idle (never while printing);
-  the touch that wakes the screen never presses a button.
+- Files: OctoPrint local storage with folders, sorting, grid/list views and search with the on-screen keyboard;
+  file details (time, filament, dimensions) with print/select/delete; the printer SD card; a USB stick plugged
+  into the Pi, whose G-code files are imported into OctoPrint with a progress bar, then ejected safely.
+- Slicer thumbnails (PrusaSlicer/OrcaSlicer PNG, JPG and QOI) extracted by the agent, no OctoPrint plugin needed
+  (the Slicer Thumbnails plugin is used when installed).
+- Screensaver with a large progress/clock view (optionally with the file thumbnail) and optional HDMI power-off
+  when idle (never while printing); the touch that wakes the screen never presses a button.
 - Big end-of-print / failure / pause notices, with the `M300` beep through the printer's buzzer.
 - Marlin host prompts (`M876`) shown as touch dialogs.
 - English and Italian, fully offline (no CDN, works without Wi-Fi).
 
 Planned:
 
-- File browser for OctoPrint local storage, the printer SD card and a USB stick plugged into the Pi, with slicer thumbnails.
 - Temperatures with presets and a live chart, movement/jog, filament load/unload wizard.
 - G-code terminal with an on-screen keyboard, macros, manual bed leveling and mesh view.
 - System screen and settings, PSU/light control, installer for OctoPi.
@@ -37,7 +44,8 @@ Chromium (kiosk) ──► agent 127.0.0.1:8765 ──► OctoPrint 127.0.0.1:50
                       • serves the web app
                       • proxies /api, /sockjs, /plugin, /downloads and adds the API key
                       • proxies /webcam/* to camera-streamer (127.0.0.1:8080), like OctoPi's haproxy
-                      • local endpoints: /local/health, /local/settings, /local/display (HDMI on/off), …
+                      • local endpoints: /local/health, /local/settings, /local/display (HDMI on/off),
+                        /local/thumbnail (G-code thumbnails), /local/usb (USB stick), /local/events, …
 ```
 
 The browser never sees the OctoPrint API key: the Python agent injects it. For this reason the agent listens on
@@ -74,6 +82,20 @@ The `webcam` service is a fake camera: an MJPEG test pattern with a frame counte
 like camera-streamer on OctoPi. OctoPrint's default stream URL `/webcam/?action=stream` reaches it through the
 agent. Stop it (`docker compose -f dev/docker-compose.yml stop webcam`) to see the "no webcam" fallback. In Docker
 the HDMI power endpoint (`/local/display`) only logs (`FOT_DISPLAY_BACKEND=none`).
+
+`dev/fake-usb/` is the fake USB stick (`/media/usb0` in the agent, read-only): drop `.gcode` files there and tap
+refresh on the USB tab. The agent notices a stick appearing or disappearing within 2 s. There is no udev/systemd
+in Docker, so "Eject" only hides the stick until its content changes (`FOT_USB_EJECT_COMMAND=none`). The agent
+reads OctoPrint's uploads (volume mounted read-only) to extract thumbnails, as it does on the Pi.
+
+Agent settings added for files (in `config.json` or as `FOT_*` environment variables):
+
+| Setting | Default | What |
+|---|---|---|
+| `uploads_dir` (`FOT_UPLOADS_DIR`) | `~/.octoprint/uploads` | OctoPrint's local storage, read for thumbnails (download through OctoPrint if not readable) |
+| `usb_roots` (`FOT_USB_ROOTS`) | `/media/usb*` | glob patterns of the USB stick mount points |
+| `usb_eject_command` (`FOT_USB_EJECT_COMMAND`) | `systemd-mount --umount {path}` | command that unmounts a stick; `none` only hides it |
+| `usb_max_file_mb` (`FOT_USB_MAX_FILE_MB`) | `1024` | largest file accepted for import |
 
 Pages and URL options useful while developing:
 
@@ -117,13 +139,13 @@ All commands are run from the repository root.
 | `docker compose -f dev/docker-compose.yml run --rm agent-test` | agent: ruff lint + format check + pytest |
 | `docker compose -f dev/docker-compose.yml run --rm frontend-test` | frontend: svelte-check + tsc + vitest |
 | `docker compose -f dev/docker-compose.yml run --rm build` | production build of the frontend into `frontend/dist` |
-| `docker compose -f dev/docker-compose.yml run --rm playwright` | smoke test (data layer, every screen, NumPad and confirmations, host prompt, printer overlay, a real print from the Home with fan/speed sliders, pause/resume, webcam and the end-of-print notice, screensaver and screen off, kiosk mode, language) + 1024×600 screenshots into `dev/screenshots/` |
+| `docker compose -f dev/docker-compose.yml run --rm playwright` | smoke test (data layer, every screen, NumPad and confirmations, host prompt, printer overlay, Files (folders, sort, search, detail, delete, SD card, USB import/eject), a real print from the Home with fan/speed sliders, pause/resume, webcam and the end-of-print notice, screensaver and screen off, kiosk mode, language) + 1024×600 screenshots into `dev/screenshots/` |
 | `docker compose -f dev/docker-compose.yml run --rm playwright sh -c "npm install && node accents.mjs"` | screenshots of Home, NumPad and gallery for each accent colour |
 | `docker compose -f dev/docker-compose.yml run --rm shellcheck` | lint every shell script |
 
 Sample G-code files with PrusaSlicer (PNG, QOI) and OrcaSlicer thumbnails live in `dev/sample-gcode/` and are
 generated by `dev/tools/make_sample_gcode.py`; `3dbenchy_prusaslicer.gcode` is a real PrusaSlicer 2.9 export for
-the Tatara A8 profile (240 layers, about 1 h, no thumbnail), handy for long jobs and the "no thumbnail" case.
+the Tatara A8 profile (240 layers, about 45 min, 300×300 PNG thumbnail), handy for long jobs and real file info.
 `dev/fake-usb/` is mounted into the agent as a fake USB stick.
 
 ## Installation on the Raspberry Pi
