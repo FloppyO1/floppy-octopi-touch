@@ -9,7 +9,7 @@ PASSWORD="${OCTOPRINT_DEV_PASSWORD:-admin}"
 API_KEY="${OCTOPRINT_API_KEY:-}"
 APP_ID="FloppyOctoTouch (dev)"
 
-mkdir -p "$BASE/uploads" "$BASE/data/appkeys"
+mkdir -p "$BASE/uploads" "$BASE/data/appkeys" "$BASE/virtualSd"
 
 MARKER="$BASE/.floppyoctotouch-seeded"
 if [ ! -f "$MARKER" ]; then
@@ -51,6 +51,20 @@ for f in /samples/*.gcode; do
     echo "init: added sample $name"
   fi
 done
+
+# A sub-folder, so the file browser has a tree to navigate.
+mkdir -p "$BASE/uploads/examples"
+if [ -e /samples/coaster_prusaslicer-qoi.gcode ] && [ ! -e "$BASE/uploads/examples/coaster-copy.gcode" ]; then
+  cp /samples/coaster_prusaslicer-qoi.gcode "$BASE/uploads/examples/coaster-copy.gcode"
+  echo "init: added examples/coaster-copy.gcode"
+fi
+
+# One file on the Virtual Printer's SD card. Not an 8.3 name: the Virtual Printer drops files whose
+# name is already a DOS name (its short/long name map overwrites them).
+if [ -e /samples/calibration-cube_prusaslicer.gcode ] && [ ! -e "$BASE/virtualSd/sd-cube.gcode" ]; then
+  cp /samples/calibration-cube_prusaslicer.gcode "$BASE/virtualSd/sd-cube.gcode"
+  echo "init: added sd-cube.gcode to the virtual SD card"
+fi
 
 if ! octoprint --basedir "$BASE" user list 2>/dev/null | grep -q "$USERNAME"; then
   octoprint --basedir "$BASE" user add --password "$PASSWORD" --admin "$USERNAME"
