@@ -6,6 +6,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-09-25
+
+### Added
+- System screen, overview: CPU (tinted by temperature too, with temperature and frequency), RAM and disk ring
+  gauges refreshed every 3 s while visible; network (connection type, Wi-Fi name and signal, IP, gateway, host
+  name, uptime, interface); OctoPrint restart, Pi reboot and shutdown (listed when configured in OctoPrint) with
+  confirmations that warn about a running print; "Restart the screen" (kiosk restart through the agent, page reload
+  when no command is configured); OctoPrint custom system commands.
+- Power and lights: PSU Control switch (state from its socket message, `turnPSUOn`/`turnPSUOff`, turning off
+  always confirmed), optionally in the status bar; custom actions that send G-code, run an OctoPrint system command
+  or call a plugin SimpleApi command with JSON fields, with icon, colour, optional confirmation and up to three in
+  the status bar.
+- Settings tab with seven sections: general (language, accent, 24-hour clock, end-of-print beep and its G-code,
+  reset of every setting), screen (screensaver on/off, timeout, thumbnail; screen off and its timeout),
+  temperatures (confirmation thresholds, highest targets), motion (jog speeds, paper test inset and travel Z,
+  extruder setup), firmware (M115 report, per-capability auto/on/off override, read again), power and lights,
+  connection (API key, manual webcam URL).
+- OctoPrint API key replaced from the dashboard (in-app keyboard): the agent checks it against OctoPrint, saves it
+  in `config.json` (mode 600) and uses it at once, then the page reconnects. The "connecting" overlay offers the
+  same when there is no key or OctoPrint rejects it.
+- About tab: versions (app, OctoPrint, agent, firmware), host name, repository placeholder, licence and the bundled
+  third-party software.
+- Status bar: network icon (Wi-Fi bars, Ethernet, no network) with the IP address, and the quick action buttons.
+- Agent: `GET /local/system` (CPU usage, temperature and frequency, load, memory, disk, interfaces, default route,
+  Wi-Fi from `nmcli` when installed or `/proc/net/wireless`; only `/proc`, `/sys` and `statvfs`), `GET/PUT
+  /local/apikey`, `POST /local/kiosk/restart`; config `kiosk_restart_command`, `disk_path`.
+- Settings schema v7: `customActions`, `psu.statusBar`.
+- Development: the dev OctoPrint gets harmless reboot/shutdown commands and a custom "Toggle lights (dev)" system
+  command; the smoke test covers the System screen (metrics, mocked reboot, custom command, screen restart, custom
+  actions from the status bar, every settings section, capability override, API key refused and accepted, reset,
+  PSU Control with a mocked plugin, the overlay's API key button).
+
+### Changed
+- The temporary System screen (session 3) is replaced; language and accent moved to Settings → General.
+- The agent runs its external commands (wlr-randr, eject, kiosk restart, nmcli) through one helper, and the proxy
+  reads the API key at every request (it can change at runtime).
+- The icon and colour picker of the macro editor is a shared component (also used by custom actions).
+
 ## [0.7.0] - 2026-09-25
 
 ### Added

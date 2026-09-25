@@ -453,7 +453,7 @@ _Legenda: `[ ]` da fare · `[~]` in corso (interrotta se la trovi a inizio sessi
 - [x] Sessione 5 — File (2026-09-25, v0.5.0)
 - [x] Sessione 6 — Temperature, Movimento, Filamento (2026-09-25, v0.6.0)
 - [x] Sessione 7 — Terminale, Macro, Livellamento/Mesh (2026-09-25, v0.7.0)
-- [ ] Sessione 8 — Sistema e Impostazioni
+- [x] Sessione 8 — Sistema e Impostazioni (2026-09-25, v0.8.0)
 - [ ] Sessione 9 — Installazione sul Raspberry
 - [ ] Sessione 10 — Test reale e rifinitura
 
@@ -836,3 +836,66 @@ _(ogni sessione aggiunge qui decisioni prese, deviazioni dal piano, problemi ape
 - Comandi utili: `docker compose -f dev/docker-compose.yml run --rm -e ONLY=leveling playwright`; simulare un report
   mesh: `curl -H 'Content-Type: application/json' -d '{"commands":["!!DEBUG:send Bilinear Leveling Grid:","!!DEBUG:send 0 1","!!DEBUG:send 0 +0.100 -0.050","!!DEBUG:send 1 +0.020 +0.000","!!DEBUG:send ok"]}' http://127.0.0.1:8765/api/printer/command`
   (la heatmap compare in Livellamento → Mesh anche senza capability).
+
+**Sessione 8 — Sistema e Impostazioni (2026-09-25, v0.8.0)**
+- Fatto (agent): `system.py` (`SystemInfo`: CPU % dal delta di `/proc/stat` fra due richieste o due campioni a
+  250 ms, temperatura SoC da `/sys/class/thermal`, frequenza da `cpufreq`, load, RAM da `MemAvailable`, disco con
+  `statvfs` come `df`, interfacce da `/sys/class/net` con IPv4 via `SIOCGIFADDR`, rotta di default e gateway da
+  `/proc/net/route`, Wi-Fi da `nmcli -t -f ACTIVE,SSID,SIGNAL,DEVICE device wifi list --rescan no` con cache 10 s,
+  altrimenti qualità da `/proc/net/wireless`; niente dipendenze), `control.py` (`GET /local/system`,
+  `GET/PUT /local/apikey` con verifica su `/api/version`, salvataggio in `config.json` a 600 e uso immediato,
+  `POST /local/kiosk/restart`), `commands.py` (un solo `run_command()` per wlr-randr, espulsione, kiosk, nmcli).
+  Config nuova: `kiosk_restart_command` (default `sudo -n systemctl restart floppyoctotouch-kiosk.service`),
+  `disk_path`, `config_path`/`env_overrides` (non letti dal file). Il proxy legge la API key a ogni richiesta.
+  69 pytest (13 nuovi, con `/proc` e `/sys` finti di un Pi in Wi-Fi).
+- Fatto (frontend): schermata Sistema con tab **Panoramica / Impostazioni / Informazioni**. Panoramica: anelli CPU
+  (tono = calore se peggiore del carico, sottotitolo temperatura · MHz), RAM, disco; rete (tipo, SSID e segnale, IP,
+  gateway, host, acceso da, interfaccia), aggiornati ogni 3 s solo con la schermata aperta; comandi di sistema di
+  OctoPrint (riavvio OctoPrint, riavvio/spegnimento Pi con conferme localizzate, pericolo se c'è una stampa;
+  comandi custom con il loro testo di conferma), "Riavvia lo schermo"; card Alimentazione e luci (PSU Control +
+  azioni personalizzate + comandi custom di OctoPrint). Impostazioni in 7 sezioni (generale, schermo,
+  temperature, movimento, firmware con override auto/sì/no per ogni capability, alimentazione e luci,
+  connessione con API key e URL webcam), salvataggio automatico, ripristino totale con conferma. Informazioni:
+  versioni, firmware, host, repo (placeholder `github.com/FloppyO1/FloppyOctoTouch`), licenza, componenti inclusi.
+  Status bar: icona rete (barre Wi-Fi / Ethernet / nessuna rete) + IP, fino a 3 azioni rapide e il pulsante PSU.
+  Overlay di connessione: pulsante "Inserisci l'API key" con key assente o rifiutata. Settings **v7**
+  (`customActions`, `psu.statusBar`). 138 vitest (11 nuovi); bundle JS 145,3 KB gzip (+ CSS 12,3 KB).
+- Smoke test: nuovo passo `system` (metriche, reboot confermato e intercettato, comando custom reale, riavvio
+  schermo = reload, CRUD azioni con status bar, errore JSON del plugin, 7 sezioni, timeout salvaschermo, override
+  capability, API key sbagliata rifiutata e giusta salvata con riconnessione, reset, About, italiano, PSU Control
+  simulato con `page.route`, overlay con API key). Verde su Vite e sulla build dell'agent.
+  `docs/images/system-v0.8.0.png`.
+- Decisioni:
+  - **API key**: la sostituisce l'agent (verifica su OctoPrint prima di salvare, la key non torna mai al browser,
+    solo le ultime 4 cifre); poi la pagina si ricarica per rifare login passivo e socket. Se la key arriva da
+    `FOT_API_KEY` (Docker) viene usata subito ma all'avvio vince di nuovo l'ambiente: l'UI lo dice.
+  - Riavvio kiosk via `sudo -n systemctl restart floppyoctotouch-kiosk.service`: **S9 deve aggiungere la regola
+    sudoers** (solo quel comando, senza password) e il nome esatto della unit; senza comando la pagina si ricarica.
+  - Riavvio/spegnimento non bloccati durante la stampa (serve per recuperare un sistema bloccato) ma con conferma
+    rossa che avvisa della stampa persa; pulsanti neutri con icona rossa (il pericolo lo porta la conferma).
+  - Pulsanti rapidi nella status bar 56 × 48 px (altezza della barra), sotto i 56 px in verticale: accettato perché
+    la barra è alta 48 px; massimo 3 azioni.
+  - PSU spento sempre con conferma, acceso senza. Stato da messaggio socket `psucontrol` (`isPSUOn`) +
+    `GET /api/plugin/psucontrol` alla connessione (verificato sul sorgente del plugin; non installato in dev).
+  - Filtri del terminale e passo babystep restano nelle loro schermate (sono contestuali); velocità jog, paper test
+    ed estrusore (stesso dialog della schermata Filamento) anche nelle Impostazioni.
+  - `restart_safe` (OctoPrint in safe mode) non mostrato nella panoramica: strumento di diagnosi, resta via
+    OctoPrint.
+- Deviazioni / scoperte:
+  - Il dev server Vite legge `package.json` solo all'avvio: About mostrava ancora 0.5.0 → dopo un bump riavviare il
+    servizio `frontend` (gotcha in CLAUDE.md).
+  - Escape chiude tutti i modal impilati (anche il gestore sotto l'editor): nei test si usa Annulla.
+  - Nel container agent non ci sono `nmcli`, `ip`, `cpufreq` né sensori termici: temperatura e frequenza CPU si
+    vedono solo sul Pi. Seed OctoPrint con comandi reboot/shutdown innocui (`echo`) e un comando custom "Toggle
+    lights (dev)", applicati anche al volume esistente via `/api/settings`.
+  - `MacroEditor` usa ora il componente condiviso `LookPicker` (icona e colore) con le azioni.
+  - Errore di processo: un comando Bash con un `cat > /dev/null` di troppo (rimasto in attesa, fermato) e un
+    `python3 --version` sull'host, mai partito; da non ripetere.
+- Problemi aperti / note per le prossime sessioni:
+  - S9: regola sudoers per il riavvio kiosk; unità dell'agent con `WAYLAND_DISPLAY` (wlr-randr) e accesso a
+    `nmcli` (su Bookworm l'utente normale può leggere lo stato senza polkit); `config.json` creato da `install.sh`
+    con `api_key` (l'agent lo riscrive a 600 quando si cambia la key dallo schermo).
+  - S10: verificare su Pi SSID/segnale da `nmcli`, temperatura/frequenza CPU, spegnimento e riavvio dal menu
+    (OctoPi ha già `sudo shutdown`/`reboot` configurati in OctoPrint), PSU Control se l'utente lo installa.
+- Comandi utili: `curl http://127.0.0.1:8765/local/system`, `curl http://127.0.0.1:8765/local/apikey`;
+  `docker compose -f dev/docker-compose.yml run --rm -e ONLY=system playwright`.

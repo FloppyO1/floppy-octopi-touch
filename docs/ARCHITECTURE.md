@@ -11,7 +11,8 @@
 │   • reverse proxy /api /sockjs /plugin /downloads ──────────► OctoPrint 127.0.0.1:5000 │
 │     (adds X-Api-Key, relays WebSockets)                                                │
 │   • /webcam/* ──► camera-streamer 127.0.0.1:8080 (prefix removed, no API key)          │
-│   • /local/* endpoints (health, settings, display, thumbnails, USB, events)            │
+│   • /local/* endpoints (health, settings, system, API key, kiosk, display, thumbnails, │
+│     USB, events)                                                                       │
 └────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -37,6 +38,9 @@ Package `agent/floppyoctotouch_agent`:
 | `config.py` | `Config` dataclass; JSON file (`FOT_CONFIG`, default `~/.config/floppyoctotouch/config.json`) overridden by `FOT_*` env vars |
 | `proxy.py` | `OctoPrintProxy`: streams HTTP requests/responses (bodies untouched, `Content-Encoding` preserved), bridges WebSocket upgrades; strips client `X-Api-Key`, `Authorization`, `Origin`, `Referer` and hop-by-hop headers. `WebcamProxy`: `GET /webcam/<path>` → `<webcam_url>/<path>` (what OctoPi's haproxy does), streams endless MJPEG responses until the browser closes them |
 | `display.py` | `Display`: HDMI output power with `wlr-randr --output <display_output> --on/--off` (the cage session's Wayland display), or backend `none` (only logs; development) |
+| `commands.py` | `run_command()`: runs an external program with a timeout, `CommandError` with a readable reason (not installed, timed out, exit status + stderr); used for wlr-randr, eject, kiosk restart and nmcli |
+| `system.py` | `SystemInfo`: CPU usage from two `/proc/stat` samples (the previous request's, or two 250 ms apart when older than 30 s), SoC temperature (`/sys/class/thermal`, the `cpu` zone first), frequency (`cpufreq`), load, memory (`MemAvailable`), disk (`statvfs` of `disk_path`, like `df`), interfaces (`/sys/class/net` without lo/docker/veth/bridges, IPv4 via `SIOCGIFADDR`), default route and gateway (`/proc/net/route`), Wi-Fi SSID/signal from `nmcli -t … device wifi list --rescan no` (cached 10 s, not retried when missing) or the link quality of `/proc/net/wireless` |
+| `control.py` | `ControlApi`: `/local/system`, `/local/apikey` (validation on OctoPrint, `save_config_values()` into the config file with mode 600, used at once by the proxy and the files API), `/local/kiosk/restart` |
 | `thumbnails.py` | `ThumbnailScanner` (line by line, stops at the first G-code command, largest valid image wins), QOI decoder and PNG encoder (standard library only), `ThumbnailCache` on disk (`<data_dir>/thumbnails/<sha1>.png\|.jpg`, `.none` for files without a thumbnail, 1000 entries, one extraction at a time) |
 | `usb.py` | `UsbManager`: mounts matching `usb_roots`, G-code listing (depth 5, 1000 files, system folders skipped), `resolve()` that confines every path to its mount (no `..`, no symlinks out), eject command; streamed multipart body with a known length for the import; `EventHub` + `UsbWatcher` (mount polling every 2 s) |
 | `files.py` | `FilesApi`: the thumbnail, USB and event endpoints, `ApiError` → JSON `{error, detail}` middleware |
@@ -58,6 +62,10 @@ Package `agent/floppyoctotouch_agent`:
 | GET | `/local/usb/thumbnail?mount=<id>&path=<path>` | thumbnail of a file on a stick |
 | POST | `/local/usb/import` | `{mount, path, folder}` → uploads the file to `/api/files/local` (so OctoPrint analyses it) and streams NDJSON: `{sent, total}` every 250 ms, then `{done, name, path}` or `{error}`; closing the request cancels the upload; 413 above `usb_max_file_mb` |
 | POST | `/local/usb/eject` | `{mount}` → runs `usb_eject_command` (`{path}` = mount point) |
+| GET | `/local/system` | `{version, hostname, uptime, cpu: {percent, cores, temperature, frequency, maxFrequency, load}, memory: {total, used, percent}, disk: {path, total, used, free, percent}, network: {primary, gateway, interfaces: [{name, state, mac, ipv4, wireless}], wifi: {interface, connected, ssid, signal}}}`; missing values are `null` |
+| GET | `/local/apikey` | `{configured, hint: "…abcd", source: env|file|none, persistent}` (never the key) |
+| PUT | `/local/apikey` | `{"apiKey": "…"}`: 400 `invalid_format` (16-128 of `A-Za-z0-9_-`), 422 `rejected` (OctoPrint's `/api/version` did not answer 200 with it), 502 `octoprint_unreachable`, 500 `save_failed`; otherwise saved to `config_path`, used at once, answers like GET (`persistent: false` when `FOT_API_KEY` will win again at the next start) |
+| POST | `/local/kiosk/restart` | runs `kiosk_restart_command` → `{restarted: true}`, 503 `kiosk_restart_failed`; no command configured → `{restarted: false}` (the page reloads itself) |
 | GET | `/local/events` | Server-Sent Events: `usb` with the current mounts on connection and on every change, pings every 15 s |
 | * | `/api/**`, `/sockjs/**`, `/plugin/**`, `/downloads/**` | proxied to OctoPrint |
 | GET | `/webcam/**` | proxied to the webcam streamer (`webcam_url`, default `http://127.0.0.1:8080`); 502 if unreachable |
@@ -234,6 +242,29 @@ the client never uses them and always builds relative paths.
 - **Z offset** (`ZPanel.svelte`): babystep `M290 Z±` (0.01/0.05 mm, `babystepping` capability, also while
   printing) with a running total; probe offset `M851` (read on opening, set with the NumPad, `zProbe`); `M500`.
 
+### System and settings
+
+- **Screen** (`src/screens/System.svelte`, parts in `system/`): tabs Overview / Settings / About; the tab and the
+  settings section are kept across navigation (`system/view.svelte.ts`).
+- **Overview** (`Overview.svelte`): `system.watch(3000)` while mounted (the `system` store polls `/local/system`
+  at the pace of its fastest watcher; the status bar watches every 30 s for the network). CPU ring tone = heat
+  (`cpuTempTone`, 70/80 °C) when it is worse than the load (`usageTone`, 75/90 %). OctoPrint's
+  `/api/system/commands` are ordered by `systemActions()`: restart, reboot and shutdown get our own localised
+  confirmations (danger when a job runs), custom/plugin commands show OctoPrint's confirmation text as plain text
+  (`plainText()`). "Restart the screen" calls `/local/kiosk/restart` and reloads the page when that does nothing.
+- **Power and lights**: `power` store (PSU Control: `isPSUOn` from the plugin socket message or
+  `GET /api/plugin/psucontrol`, `turnPSUOn`/`turnPSUOff`; off always confirmed). Custom actions
+  (`core/power.ts`, settings `customActions`) send G-code (`terminal.send`), run a system command or call
+  `POST /api/plugin/<id>` with `{command, ...data}`; up to `STATUS_BAR_MAX_ACTIONS` (3) are also status bar
+  buttons (56 × 48 px, the bar height). Icons and colours are the macro ones (`terminal/LookPicker.svelte`).
+- **Settings** (`SettingsPanel.svelte` + `system/settings/*Section.svelte`): every control writes through
+  `settings.update()` (debounced save, no Save button). Firmware lists `CAPABILITY_KEYS` with the reported value and
+  an auto/on/off `Segmented` override. The extruder setup reuses the Filament screen's dialog. Reset =
+  `settings.reset()` (defaults saved at once).
+- **API key** (`system/actions.ts` → `changeApiKey()`): in-app keyboard → `PUT /local/apikey` → toast → page
+  reload (the socket logs in again). The connection overlay offers the same button for the `noApiKey` and
+  `unauthorized` reasons and drops below the dialogs (`--z-overlay`) while one is open.
+
 ### Live updates (push API)
 
 1. open `ws://<agent>/sockjs/websocket` (the agent relays it to OctoPrint with the API key);
@@ -281,6 +312,8 @@ After that REST is only used on events that announce a change:
 | `nav`, `clock` | URL hash / timer | current screen; wall clock ticking every second |
 | `events` | `event` messages + `host:prompt`, `host:promptClosed`, `host:notification`, `host:action` | `events.on(type, handler)`, last 50 kept |
 | `settings` | `/local/settings` | migrated on load, saved 400 ms after `settings.update()` |
+| `system` | `/local/system`, `/api/system/commands` | host info polled only while watched (`watch(ms)` returns the stop function), `network` summary, ordered system commands |
+| `power` | `plugin` messages of `psucontrol`, `/api/plugin/psucontrol` | PSU state, `set(on)` |
 
 Implementation note: keys added to a deep `$state` proxy are not picked up by `in` checks inside an already
 computed `$derived`; stores that are read through such checks use `$state.raw` and replace the object.

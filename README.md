@@ -3,12 +3,11 @@
 A touch-first dashboard for [OctoPrint](https://octoprint.org/), designed for a Raspberry Pi 4 running
 OctoPi with a 7" 1024×600 HDMI touch screen, shown full screen in a Chromium kiosk.
 
-> **Status: early development (v0.7.0).** Development environment, local agent, data layer, design system, app
-> shell, the Home screen (print control, live tuning, webcam, screensaver, print notices), the Files screen
-> (local storage, SD card, USB stick, slicer thumbnails), the Temperature, Move and Filament screens, the Terminal
-> with macros and the Leveling screen are in place; the full System screen and the installer are next. The
-> screens are being built session by session, see [`docs/PLAN.md`](docs/PLAN.md) (Italian) and
-> [`CHANGELOG.md`](CHANGELOG.md).
+> **Status: early development (v0.8.0).** Development environment, local agent, data layer, design system, app
+> shell and every screen are in place: Home (print control, live tuning, webcam, screensaver, print notices),
+> Files (local storage, SD card, USB stick, slicer thumbnails), Temperature, Move, Filament, Terminal with
+> macros, Leveling and System with the settings; the installer for the Pi is next. The screens are being built
+> session by session, see [`docs/PLAN.md`](docs/PLAN.md) (Italian) and [`CHANGELOG.md`](CHANGELOG.md).
 
 ![Home screen at 1024×600 while printing](docs/images/home-v0.4.0.png)
 
@@ -17,6 +16,8 @@ OctoPi with a 7" 1024×600 HDMI touch screen, shown full screen in a Chromium ki
 ![Temperature screen with the live chart](docs/images/temperature-v0.6.0.png)
 
 ![Leveling screen with the bed mesh heatmap](docs/images/leveling-v0.7.0.png)
+
+![System screen with the Raspberry Pi metrics](docs/images/system-v0.8.0.png)
 
 ## Features
 
@@ -44,13 +45,20 @@ Available now:
 - Leveling: paper test at the four corners and the centre (no probe needed), bed mesh heatmap from `M420 V`
   (Marlin bilinear and mesh bed leveling), guided manual mesh (`G29 S1/S2`) or automatic `G29` when the firmware
   has them, babystepping (`M290`, also while printing), probe Z offset (`M851`), save to EEPROM (`M500`).
+- System: CPU (with temperature and frequency), RAM and disk rings, network (IP, Wi-Fi name and signal,
+  gateway), OctoPrint restart, Pi reboot/shutdown and custom system commands with confirmation, screen restart.
+- Power and lights: PSU Control switch (also in the status bar) and custom action buttons that send G-code, run
+  an OctoPrint system command or call a plugin API, up to three of them in the status bar.
+- Settings on the screen: language, accent colour, clock, end-of-print beep, screensaver and screen off,
+  temperature thresholds and limits, jog speeds, paper test, extruder, firmware capability overrides, webcam
+  URL, OctoPrint API key (checked by the agent, also from the "connecting" overlay), reset.
 - Big end-of-print / failure / pause notices, with the `M300` beep through the printer's buzzer.
 - Marlin host prompts (`M876`) shown as touch dialogs.
 - English and Italian, fully offline (no CDN, works without Wi-Fi).
 
 Planned:
 
-- System screen and settings, PSU/light control, installer for OctoPi.
+- Installer for OctoPi (kiosk, services, USB automount), then a test on the real hardware.
 
 ## How it works
 
@@ -59,7 +67,8 @@ Chromium (kiosk) ──► agent 127.0.0.1:8765 ──► OctoPrint 127.0.0.1:50
                       • serves the web app
                       • proxies /api, /sockjs, /plugin, /downloads and adds the API key
                       • proxies /webcam/* to camera-streamer (127.0.0.1:8080), like OctoPi's haproxy
-                      • local endpoints: /local/health, /local/settings, /local/display (HDMI on/off),
+                      • local endpoints: /local/health, /local/settings, /local/system (CPU, RAM, disk,
+                        network), /local/apikey, /local/kiosk/restart, /local/display (HDMI on/off),
                         /local/thumbnail (G-code thumbnails), /local/usb (USB stick), /local/events, …
 ```
 
@@ -103,7 +112,7 @@ refresh on the USB tab. The agent notices a stick appearing or disappearing with
 in Docker, so "Eject" only hides the stick until its content changes (`FOT_USB_EJECT_COMMAND=none`). The agent
 reads OctoPrint's uploads (volume mounted read-only) to extract thumbnails, as it does on the Pi.
 
-Agent settings added for files (in `config.json` or as `FOT_*` environment variables):
+Agent settings added for files and the System screen (in `config.json` or as `FOT_*` environment variables):
 
 | Setting | Default | What |
 |---|---|---|
@@ -111,6 +120,8 @@ Agent settings added for files (in `config.json` or as `FOT_*` environment varia
 | `usb_roots` (`FOT_USB_ROOTS`) | `/media/usb*` | glob patterns of the USB stick mount points |
 | `usb_eject_command` (`FOT_USB_EJECT_COMMAND`) | `systemd-mount --umount {path}` | command that unmounts a stick; `none` only hides it |
 | `usb_max_file_mb` (`FOT_USB_MAX_FILE_MB`) | `1024` | largest file accepted for import |
+| `kiosk_restart_command` (`FOT_KIOSK_RESTART_COMMAND`) | `sudo -n systemctl restart floppyoctotouch-kiosk.service` | "Restart the screen" on the System screen; `none` only logs (the page reloads) |
+| `disk_path` (`FOT_DISK_PATH`) | `/` | file system shown as "disk" on the System screen |
 
 Pages and URL options useful while developing:
 
@@ -142,6 +153,14 @@ To use a key created by hand (as you will do on the Pi):
 
 `http://localhost:8765/local/health` tells whether OctoPrint is reachable and the key is accepted.
 
+The key can also be replaced from the dashboard (System → Settings → Connection, or the button on the
+"connecting" overlay when OctoPrint rejects it): the agent checks it against OctoPrint, saves it in its
+`config.json` (mode 600) and uses it at once. A key set through `FOT_API_KEY` (as in Docker) wins again at the
+next start.
+
+The development OctoPrint has harmless reboot/shutdown commands (`echo`) and a custom `Toggle lights (dev)`
+system command, so the System screen shows them; the smoke test intercepts reboot/shutdown anyway.
+
 ### Recurring commands
 
 All commands are run from the repository root.
@@ -154,7 +173,7 @@ All commands are run from the repository root.
 | `docker compose -f dev/docker-compose.yml run --rm agent-test` | agent: ruff lint + format check + pytest |
 | `docker compose -f dev/docker-compose.yml run --rm frontend-test` | frontend: svelte-check + tsc + vitest |
 | `docker compose -f dev/docker-compose.yml run --rm build` | production build of the frontend into `frontend/dist` |
-| `docker compose -f dev/docker-compose.yml run --rm playwright` | smoke test (data layer, every screen, NumPad and confirmations, host prompt, printer overlay, Files (folders, sort, search, detail, delete, SD card, USB import/eject), Temperature (targets, presets CRUD), Move (jog limits), Filament (setup, load/unload wizard, manual extrusion), Terminal (keyboard, filters, pause, history), macros CRUD, Leveling (paper test, mesh heatmap, manual mesh, babystep, probe offset), a real print from the Home with fan/speed sliders, pause/resume, webcam and the end-of-print notice, screensaver and screen off, kiosk mode, language) + 1024×600 screenshots into `dev/screenshots/`; `-e ONLY=terminal,leveling` runs only those steps |
+| `docker compose -f dev/docker-compose.yml run --rm playwright` | smoke test (data layer, every screen, NumPad and confirmations, host prompt, printer overlay, Files (folders, sort, search, detail, delete, SD card, USB import/eject), Temperature (targets, presets CRUD), Move (jog limits), Filament (setup, load/unload wizard, manual extrusion), Terminal (keyboard, filters, pause, history), macros CRUD, Leveling (paper test, mesh heatmap, manual mesh, babystep, probe offset), System (metrics, system commands, custom actions and status bar, every settings section, API key, reset, PSU Control), a real print from the Home with fan/speed sliders, pause/resume, webcam and the end-of-print notice, screensaver and screen off, kiosk mode, language) + 1024×600 screenshots into `dev/screenshots/`; `-e ONLY=terminal,leveling` runs only those steps |
 | `docker compose -f dev/docker-compose.yml run --rm playwright sh -c "npm install && node accents.mjs"` | screenshots of Home, NumPad and gallery for each accent colour |
 | `docker compose -f dev/docker-compose.yml run --rm shellcheck` | lint every shell script |
 

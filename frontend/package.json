@@ -1,6 +1,6 @@
 {
   "name": "floppyoctotouch",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Touch dashboard for OctoPrint on a 1024x600 display",
   "private": true,
   "license": "MIT",

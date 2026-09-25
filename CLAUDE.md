@@ -54,6 +54,8 @@ docker compose -f dev/docker-compose.yml down -v             # wipe OctoPrint/ag
 
 ```
 agent/floppyoctotouch_agent/   config.py, proxy.py (OctoPrint + /webcam), display.py (wlr-randr), settings.py, app.py,
+                               commands.py (run_command for external programs), system.py (/proc, /sys, nmcli),
+                               control.py (/local/system, /local/apikey, /local/kiosk/restart),
                                thumbnails.py (G-code thumbnails + disk cache), usb.py (sticks, import, watcher),
                                files.py (/local/thumbnail, /local/usb*, /local/events SSE),
                                __main__.py; tests in agent/tests
@@ -65,10 +67,12 @@ frontend/src/lib/core/         pure logic + tests: capabilities (M115), hostActi
                                lists (move/upsert/remove by id), move (jog direction + volume limits), filament
                                (load/unload/purge G-code), chart, terminal (filters, line kinds, history), macros,
                                mesh (LevelingParser: M420 V / G29 reports, stats, colour scale), leveling (paper
-                               test points, G-code, G28/M84 detection)
+                               test points, G-code, G28/M84 detection), system (usage/heat tones, network
+                               summary, system command order, HTML confirm → text), power (PSU state, custom
+                               actions: validation, sanitising)
 frontend/src/lib/stores/       *.svelte.ts singletons (connection, printer/job, temperatures, files, usb, terminal,
                                events, capabilities, prompt, server, settings, nav, clock, tune, notices, idle,
-                               leveling)
+                               leveling, system (polled only while watched), power (PSU Control))
                                + dataLayer.ts (socket wiring)
 frontend/src/lib/i18n/         en.json, it.json, index.svelte.ts (t(), setLocale())
 frontend/src/lib/ui/           design system: tokens.css, components (Button, Card, Modal, NumPad, OnScreenKeyboard, Thumb,
@@ -83,7 +87,10 @@ frontend/src/screens/          Home + home/ (JobView, IdleView, Preview, StatusR
                                ManualPanel, FilamentSetup), Terminal + terminal/ (view state, Console, MacroGrid,
                                MacroManager/Editor, macroLook.ts, actions.ts), Leveling + leveling/ (view state,
                                PaperTest, MeshPanel, MeshMap heatmap, ZPanel, actions.ts), heaterTarget.ts,
-                               System (temporary); dev/Gallery + dev/Debug (dev only)
+                               System + system/ (view state, Overview, SettingsPanel + settings/*Section, About,
+                               ActionManager/Editor, actions.ts also used by the status bar and the connection
+                               overlay); terminal/LookPicker (icon + colour, macros and actions); dev/Gallery +
+                               dev/Debug (dev only)
 frontend/preview.html          1024×600 frame around the app (also in the production build)
 dev/docker-compose.yml         dev stack + tool services; dev/docker/*.Dockerfile
 dev/octoprint/                 seed config.yaml + init.sh for the OctoPrint volume
@@ -162,13 +169,25 @@ deploy/, scripts/              placeholders (session 9)
   which also puts them back to `auto`.
 - Values parsed from the `history` log replay may be stale (e.g. an old `M851` answer): screens that show firmware
   state ask again when they open. Capabilities count as known only after a `FIRMWARE_NAME` line.
+- Vite reads `frontend/package.json` only when it starts: after a version bump restart the `frontend` service
+  (`docker compose -f dev/docker-compose.yml restart frontend`), or About shows the old version.
+- Escape closes every stacked modal at once (each `Modal` listens on the window): in Playwright close an editor
+  opened from a manager with its Cancel button.
+- `waitText()` in the smoke test serialises its predicate: it cannot see outer variables, build it with
+  `new Function(...)` (see the API key check).
+- The dev OctoPrint has `echo` reboot/shutdown commands and a custom `lights` system command (seed + applied once
+  through `/api/settings`); the smoke test still intercepts `POST /api/system/commands/core/*`. PSU Control is
+  not installed: the smoke test fakes its `plugins` key in `/api/settings` and its SimpleApi with `page.route`.
+- The agent's `/local/apikey` writes the key into `config_path` (`FOT_CONFIG`, default
+  `~/.config/floppyoctotouch/config.json`); in Docker `FOT_API_KEY` wins again at the next start.
 
 ## Current state
 
-v0.7.0 (session 7): Terminal screen (filtered live log, pause, auto-scroll, in-app G-code keyboard, history, quick
-commands) with a Macros tab (big buttons, CRUD with icon/colour/confirm, restore defaults); Leveling screen (paper
-test at 4 corners + centre, mesh heatmap from `M420 V` for bilinear/MBL, guided MBL `G29 S1/S2`, automatic `G29`,
-babystep `M290`, probe offset `M851`, `M500`), locked while printing except babystep; settings schema v6.
-Temperature/Move/Filament (session 6), Files (session 5), Home/screensaver/notices (session 4), design system and
-shell (session 3, accent teal). Next: session 8 (System and settings).
+v0.8.0 (session 8): System screen with Overview (CPU/RAM/disk rings from `/local/system`, network, OctoPrint
+restart, Pi reboot/shutdown, custom system commands, screen restart, PSU Control and custom power/light actions),
+Settings (general, screen, temperatures, motion, firmware capability overrides, power & lights, connection with
+the API key checked and saved by the agent) and About; status bar with network/IP and up to 3 quick actions;
+the connection overlay offers to enter the API key; settings schema v7. Terminal/Macros/Leveling (session 7),
+Temperature/Move/Filament (session 6), Files (session 5), Home/screensaver/notices (session 4), design system
+and shell (session 3, accent teal). Next: session 9 (installer for the Pi).
 See `docs/PLAN.md` for details and notes between sessions.
