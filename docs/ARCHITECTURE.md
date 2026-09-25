@@ -75,12 +75,12 @@ icons are bundled.
 | Folder | Content |
 |---|---|
 | `src/lib/api/` | transport: `http.ts` (JSON helpers, path encoding), `octoprint.ts` (typed REST client), `agent.ts` (`/local/*`), `socket.ts` (push API), `types.ts` (OctoPrint 1.11 types) |
-| `src/lib/core/` | pure, unit-tested logic: M115 capabilities, host action parser, temperature ring buffer, file tree helpers (recent files, thumbnails, sort, search, breadcrumbs), printer phase/tone and plugin detection, settings schema/migrations, formatting, gauge geometry, NumPad entry, keyboard layouts, overrides from the log (`tune`), DisplayLayerProgress layers (`layer`), webcam source (`webcam`), idle levels (`idle`), print notices (`notices`), presets list operations (`presets`), jog limits (`move`), filament sequences (`filament`), chart colours (`chart`) |
+| `src/lib/core/` | pure, unit-tested logic: M115 capabilities, host action parser, temperature ring buffer, file tree helpers (recent files, thumbnails, sort, search, breadcrumbs), printer phase/tone and plugin detection, settings schema/migrations, formatting, gauge geometry, NumPad entry, keyboard layouts, overrides from the log (`tune`), DisplayLayerProgress layers (`layer`), webcam source (`webcam`), idle levels (`idle`), print notices (`notices`), presets validation (`presets`), generic list operations (`lists`), jog limits (`move`), filament sequences (`filament`), chart colours (`chart`), terminal filters and history (`terminal`), macros (`macros`), mesh parser and stats (`mesh`), paper test points and leveling G-code (`leveling`) |
 | `src/lib/stores/` | Svelte 5 stores (classes with `$state`/`$derived`, one singleton each) and `dataLayer.ts`, which wires the socket to them |
 | `src/lib/i18n/` | `en.json`, `it.json`, `t()`, `setLocale()` (default English) |
 | `src/lib/ui/` | design system: tokens, components, `dialogs`/`toast` services, `pressable` attachment, theme (accent) and kiosk helpers |
 | `src/shell/` | app shell: sidebar, status bar, screen registry, connection and printer overlays, screensaver, print notice dialog |
-| `src/screens/` | screens (`Home` with its parts in `home/`, `Files` in `files/`, `Temperature` in `temperature/`, `Move` in `move/`, `Filament` in `filament/`, temporary `System`, `Placeholder`), shared `heaterTarget.ts`, dev-only pages in `dev/` (`Gallery`, `Debug`) |
+| `src/screens/` | screens (`Home` with its parts in `home/`, `Files` in `files/`, `Temperature` in `temperature/`, `Move` in `move/`, `Filament` in `filament/`, `Terminal` in `terminal/`, `Leveling` in `leveling/`, temporary `System`), shared `heaterTarget.ts`, dev-only pages in `dev/` (`Gallery`, `Debug`) |
 
 OctoPrint returns absolute `refs` URLs built from its own host (e.g. `http://octoprint:5000/...` in Docker):
 the client never uses them and always builds relative paths.
@@ -192,6 +192,48 @@ the client never uses them and always builds relative paths.
   `filament.minTemp`. `FilamentSetup` edits `filament.*` and sets `configured`; until then the wizard warns once
   per session. During a job the screen is locked and, with the `advancedPause` capability, offers `M600`.
 
+### Terminal and macros
+
+- **Console** (`src/screens/Terminal.svelte`, parts in `terminal/`): the log is `terminal.lines` (last 1000) run
+  through `visibleLines()` (`core/terminal.ts`: newest 300 after the filters). The filters follow OctoPrint's own
+  terminal filters (temperature reports and M105, plain `ok`, `busy`/`wait`, SD status and M27, the dashboard's
+  M400/M114 and their answers) and are settings (`terminal.filters`, true = hidden). `lineKind()` colours sent,
+  received, warning (`Unknown command`), error and OctoPrint's own lines. The view follows the end until the user
+  scrolls up ("Latest" jumps back); Pause freezes the list at the last line id and counts what arrives meanwhile.
+  Clear empties the local copy only. Tab, command being typed and pause live in `terminal/view.svelte.ts`.
+- **Input**: an in-app `OnScreenKeyboard` (G-code layer first) opens under the command field instead of the
+  full-screen text sheet, so the log stays visible; Enter sends. `terminal.submit()` normalizes the command and
+  keeps a session history (newest first, no duplicates, 30 entries) shown as a list. Five quick read-only commands
+  (M114, M105, M119, M503, M115) are one tap.
+- **Macros**: `settings.macros` (name, icon, colour, multi-line G-code, confirm). `macroCommands()`
+  (`core/macros.ts`) drops `;` comments and blank lines; `runMacro()` asks first when the macro says so and always
+  while a job runs (the commands go between the file's lines). `MacroManager`/`MacroEditor` mirror the preset
+  manager (generic list operations in `core/lists.ts`, `defaultMacros()` to restore); icons are names mapped to
+  Lucide components in `terminal/macroLook.ts`, colours map to theme tokens.
+
+### Leveling and mesh
+
+- **Screen** (`src/screens/Leveling.svelte`, parts in `leveling/`): tabs Paper test / Mesh / Z offset. Moves are
+  disabled while `printer.busy`; babystepping stays available. The `leveling` store reads the terminal log with
+  `LevelingParser` (`core/mesh.ts`) and keeps the last mesh, "no mesh stored", leveling on/off, the probe Z
+  offset, the babysteps sent and the state of the dashboard's own procedures.
+- **Homing**: `printer.homedAxes` follows every sent `G28` (per axis) and `M84`/`M18` in the log, whoever sent it,
+  and resets on `Disconnected`; the paper test needs X, Y and Z homed.
+- **Paper test** (`PaperTest.svelte`): `levelingPoints()` (`core/leveling.ts`) puts the four corners
+  `leveling.inset` mm inside the profile volume (clamped, `origin: center` aware) plus the centre; a point sends
+  `G90`, lift to `leveling.zHop`, travel, `G1 Z0`, then `M400` + `M114`. "Raise nozzle" lifts again.
+- **Mesh** (`MeshPanel.svelte`, `MeshMap.svelte`): Read sends `M420 V`. The parser recognises Marlin's bilinear
+  grid (`Bilinear Leveling Grid:`, 3 decimals; a following subdivided grid is ignored) and the MBL report
+  (`Measured points:`, 5 decimals), rows indexed by Y (0 = front), `=====`/`nan` = not probed; a report may span
+  several socket messages and `Send:` lines in between are skipped. The heatmap draws the back row on top with a
+  diverging scale around the mesh average (blue lower, orange higher, grey average, at least ±0.05 mm so a flat
+  bed stays pale), the value in every cell, the extremes outlined and min/max/range below. Automatic `G28` + `G29`
+  + `M420 V` with the `autolevel` capability; guided manual mesh with `manualMesh`: `G29 S1`, Z jogs (steps
+  `leveling.meshStep`, soft endstops are loose during MBL), `G29 S2` per point, "Mesh probing done." ends it and
+  reads the mesh; cancelling homes again. Save sends `M500` (with `eeprom`).
+- **Z offset** (`ZPanel.svelte`): babystep `M290 Z±` (0.01/0.05 mm, `babystepping` capability, also while
+  printing) with a running total; probe offset `M851` (read on opening, set with the NumPad, `zProbe`); `M500`.
+
 ### Live updates (push API)
 
 1. open `ws://<agent>/sockjs/websocket` (the agent relays it to OctoPrint with the API key);
@@ -215,7 +257,7 @@ After that REST is only used on events that announce a change:
 |---|---|
 | `UpdatedFiles`, `FileAdded`, `FileRemoved`, `FolderAdded`, `FolderRemoved`, `FileDeselected`, `MetadataAnalysisFinished` | file list reload (debounced 500 ms) |
 | `Connected` | reload connection and printer profile, reset the overrides; OctoPrint sends M115 itself |
-| `Disconnected` | reset firmware capabilities, host prompts, overrides and head position |
+| `Disconnected` | reset firmware capabilities, host prompts, overrides, head position, homing and leveling state |
 | `PositionUpdate` | head position (M114 answer), ignored when a jog was sent after the last request |
 | `PrintDone`, `PrintFailed`, `PrintPaused`, `PrintResumed`, `PrintCancelled`, `PrintStarted` | print notices |
 | `SettingsUpdated` / `PrinterProfileModified` | reload settings / profile |
@@ -224,10 +266,11 @@ After that REST is only used on events that announce a change:
 | Store | Source | Notes |
 |---|---|---|
 | `connection` | `/local/health`, socket status, `connected`, `/api/connection` | connect/disconnect |
-| `printer`, `job` | `current.state`, `job`, `progress`, `currentZ`, `PositionUpdate` | `phase` derived from the flags, `busy` while a job exists, ETA; head `position`, jog (optimistic), home, motors off |
+| `printer`, `job` | `current.state`, `job`, `progress`, `currentZ`, `PositionUpdate` | `phase` derived from the flags, `busy` while a job exists, ETA; head `position`, jog (optimistic), home, motors off; `homedAxes` from the sent `G28`/`M84` lines |
 | `temperatures` | `history.temps` / `current.temps` | `TemperatureHistory` (typed arrays, 2048 samples ≈ 30 min+); `revision` bumps on new samples |
-| `terminal` | `history.logs` / `current.logs` | last 1000 lines |
-| `capabilities` | `Cap:` lines of the M115 answer in the log + settings overrides | sends M115 once if the report is unknown |
+| `terminal` | `history.logs` / `current.logs` | last 1000 lines, typed-command history, `submit()`, `clear()` |
+| `leveling` | `Recv:` log lines (`LevelingParser`) | last mesh, no-mesh flag, leveling on/off, probe Z offset, babystep total, paper test point, manual mesh run |
+| `capabilities` | `Cap:` lines of the M115 answer in the log + settings overrides | known only with the `FIRMWARE_NAME` line (a report cut by `history` is not); sends M115 once if unknown |
 | `prompt` | `//action:` lines of live logs (not `history`, to avoid replaying answered prompts) | answers via the Action Command Prompt plugin when the firmware reported `PROMPT_SUPPORT`, else `M876 S<n>` |
 | `files` | `/api/files` | local tree and SD card list, `find()`, `thumbnailFor()`, select/delete, SD init/refresh/release |
 | `usb` | `/local/events`, `/local/usb` | mounts, stick files, import progress |

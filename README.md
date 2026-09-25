@@ -3,17 +3,20 @@
 A touch-first dashboard for [OctoPrint](https://octoprint.org/), designed for a Raspberry Pi 4 running
 OctoPi with a 7" 1024×600 HDMI touch screen, shown full screen in a Chromium kiosk.
 
-> **Status: early development (v0.6.0).** Development environment, local agent, data layer, design system, app
+> **Status: early development (v0.7.0).** Development environment, local agent, data layer, design system, app
 > shell, the Home screen (print control, live tuning, webcam, screensaver, print notices), the Files screen
-> (local storage, SD card, USB stick, slicer thumbnails) and the Temperature, Move and Filament screens are in
-> place; Terminal, Leveling and the full System screen are placeholders. The screens are being built session by
-> session, see [`docs/PLAN.md`](docs/PLAN.md) (Italian) and [`CHANGELOG.md`](CHANGELOG.md).
+> (local storage, SD card, USB stick, slicer thumbnails), the Temperature, Move and Filament screens, the Terminal
+> with macros and the Leveling screen are in place; the full System screen and the installer are next. The
+> screens are being built session by session, see [`docs/PLAN.md`](docs/PLAN.md) (Italian) and
+> [`CHANGELOG.md`](CHANGELOG.md).
 
 ![Home screen at 1024×600 while printing](docs/images/home-v0.4.0.png)
 
 ![Files screen with slicer thumbnails](docs/images/files-v0.5.0.png)
 
 ![Temperature screen with the live chart](docs/images/temperature-v0.6.0.png)
+
+![Leveling screen with the bed mesh heatmap](docs/images/leveling-v0.7.0.png)
 
 ## Features
 
@@ -35,13 +38,18 @@ Available now:
   off, head position, jog speeds.
 - Filament: load/unload wizard (heat, insert, load, purge) using M701/M702 or configurable G-code sequences for
   direct or bowden extruders, M600 filament change, manual extrude/retract with cold extrusion protection.
+- Terminal: live serial log with filters (temperatures, `ok`, busy, SD status, position), pause and auto-scroll,
+  commands typed on an in-app G-code keyboard, history and quick commands; macros as big buttons you can add,
+  edit, reorder and reset, with optional confirmation.
+- Leveling: paper test at the four corners and the centre (no probe needed), bed mesh heatmap from `M420 V`
+  (Marlin bilinear and mesh bed leveling), guided manual mesh (`G29 S1/S2`) or automatic `G29` when the firmware
+  has them, babystepping (`M290`, also while printing), probe Z offset (`M851`), save to EEPROM (`M500`).
 - Big end-of-print / failure / pause notices, with the `M300` beep through the printer's buzzer.
 - Marlin host prompts (`M876`) shown as touch dialogs.
 - English and Italian, fully offline (no CDN, works without Wi-Fi).
 
 Planned:
 
-- G-code terminal with an on-screen keyboard, macros, manual bed leveling and mesh view.
 - System screen and settings, PSU/light control, installer for OctoPi.
 
 ## How it works
@@ -146,7 +154,7 @@ All commands are run from the repository root.
 | `docker compose -f dev/docker-compose.yml run --rm agent-test` | agent: ruff lint + format check + pytest |
 | `docker compose -f dev/docker-compose.yml run --rm frontend-test` | frontend: svelte-check + tsc + vitest |
 | `docker compose -f dev/docker-compose.yml run --rm build` | production build of the frontend into `frontend/dist` |
-| `docker compose -f dev/docker-compose.yml run --rm playwright` | smoke test (data layer, every screen, NumPad and confirmations, host prompt, printer overlay, Files (folders, sort, search, detail, delete, SD card, USB import/eject), Temperature (targets, presets CRUD), Move (jog limits), Filament (setup, load/unload wizard, manual extrusion), a real print from the Home with fan/speed sliders, pause/resume, webcam and the end-of-print notice, screensaver and screen off, kiosk mode, language) + 1024×600 screenshots into `dev/screenshots/` |
+| `docker compose -f dev/docker-compose.yml run --rm playwright` | smoke test (data layer, every screen, NumPad and confirmations, host prompt, printer overlay, Files (folders, sort, search, detail, delete, SD card, USB import/eject), Temperature (targets, presets CRUD), Move (jog limits), Filament (setup, load/unload wizard, manual extrusion), Terminal (keyboard, filters, pause, history), macros CRUD, Leveling (paper test, mesh heatmap, manual mesh, babystep, probe offset), a real print from the Home with fan/speed sliders, pause/resume, webcam and the end-of-print notice, screensaver and screen off, kiosk mode, language) + 1024×600 screenshots into `dev/screenshots/`; `-e ONLY=terminal,leveling` runs only those steps |
 | `docker compose -f dev/docker-compose.yml run --rm playwright sh -c "npm install && node accents.mjs"` | screenshots of Home, NumPad and gallery for each accent colour |
 | `docker compose -f dev/docker-compose.yml run --rm shellcheck` | lint every shell script |
 

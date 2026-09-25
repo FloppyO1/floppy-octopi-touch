@@ -6,6 +6,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-09-25
+
+### Added
+- Terminal screen: live serial log with coloured sent/received/error lines, auto-scroll that stops when scrolled
+  up, pause with a counter of the new lines, clear; filters for temperature reports, plain `ok`, busy/wait, SD
+  status and the dashboard's position requests (remembered); command input with the in-app G-code keyboard under
+  the log, history of the typed commands and quick M114/M105/M119/M503/M115 buttons.
+- Macros tab: big buttons with icon and colour; confirmation when the macro asks for it and always while a job
+  runs; comments and blank lines are not sent. Macro manager: add and edit (name and multi-line G-code through the
+  on-screen keyboards, icon, colour, confirmation), reorder, delete (confirmed), restore the defaults (confirmed).
+- Leveling screen, paper test: the nozzle goes to Z0 over the four corners (configurable distance from the edges)
+  and the centre, with a travel height; needs the axes homed (tracked from every `G28`/`M84` sent).
+- Leveling screen, mesh: `M420 V` report parsed (Marlin bilinear and mesh bed leveling grids) into a heatmap seen
+  from the front, with min/max/range; automatic probing (`G28`, `G29`) with the `autolevel` capability; guided
+  manual mesh (`G29 S1`/`S2` with Z jogs) with the `manualMesh` capability; save to EEPROM (`M500`).
+- Leveling screen, Z offset: babystepping (`M290`, 0.01/0.05 mm, also while printing) with a running total, probe
+  Z offset (`M851`, read and set with the NumPad), save to EEPROM.
+- Settings schema v6: `terminal.filters`, `leveling.inset`, `leveling.zHop`, `leveling.babystep`,
+  `leveling.meshStep`; macro icons and colours are validated.
+- Development: the smoke test covers the terminal (keyboard input, filters, pause, history), macro CRUD and runs,
+  the paper test, a mesh report injected through the Virtual Printer (`!!DEBUG:send`), the manual mesh flow,
+  babystep, probe offset and M500; `ONLY=terminal,leveling` runs selected steps.
+
+### Changed
+- Firmware capabilities count as known only after the `FIRMWARE_NAME` line of the M115 report: after a reload the
+  log history may hold only the tail of the report, which hid features such as EEPROM.
+- The multi-line input field no longer shows part of a fourth line.
+
+### Removed
+- The placeholder screen (every sidebar entry now has its screen).
+
 ## [0.6.0] - 2026-09-25
 
 ### Added

@@ -452,7 +452,7 @@ _Legenda: `[ ]` da fare · `[~]` in corso (interrotta se la trovi a inizio sessi
 - [x] Sessione 4 — Home, controllo stampa, screensaver, notifiche (2026-09-25, v0.4.0)
 - [x] Sessione 5 — File (2026-09-25, v0.5.0)
 - [x] Sessione 6 — Temperature, Movimento, Filamento (2026-09-25, v0.6.0)
-- [ ] Sessione 7 — Terminale, Macro, Livellamento/Mesh
+- [x] Sessione 7 — Terminale, Macro, Livellamento/Mesh (2026-09-25, v0.7.0)
 - [ ] Sessione 8 — Sistema e Impostazioni
 - [ ] Sessione 9 — Installazione sul Raspberry
 - [ ] Sessione 10 — Test reale e rifinitura
@@ -773,3 +773,66 @@ _(ogni sessione aggiunge qui decisioni prese, deviazioni dal piano, problemi ape
   - Il bundle è cresciuto a 109 KB gzip: se servisse, uPlot può essere caricato a richiesta (import dinamico).
 - Comandi utili: `window.__fot.printer.position` / `window.__fot.printer.requestPosition()` in console;
   la finestra del grafico si prova con `http://localhost:5173/#/temperature`.
+
+**Sessione 7 — Terminale, Macro, Livellamento/Mesh (2026-09-25, v0.7.0)**
+- Fatto (Terminale): schermata con tab Console / Macro. Console: log live (righe inviate in accento, errori in
+  rosso, avvisi `Unknown command` in giallo, messaggi di OctoPrint attenuati), ultime 300 righe filtrate nel DOM,
+  auto-scroll che si ferma se si scorre in su (pulsante "Ultime"), pausa con contatore delle righe nuove, svuota.
+  Filtri in un dialog con interruttori (temperature/M105, `ok` semplici, busy/wait, stato SD/M27, posizione
+  M400/M114 della dashboard), persistenti. Input: campo comando + `OnScreenKeyboard` G-code **incorporata** sotto il
+  log (non il foglio a schermo intero, così il log resta visibile), Invio = invia, storico comandi della sessione
+  (lista, tocco = rimette il comando nel campo), 5 comandi rapidi di sola lettura (M114, M105, M119, M503, M115).
+- Fatto (Macro): griglia di pulsanti grandi (icona, colore, anteprima dei comandi, simbolo se chiede conferma);
+  conferma se la macro la richiede e **sempre durante un lavoro**; commenti `;` e righe vuote non inviati. Gestione
+  come i preset: aggiungi/modifica (nome e G-code multilinea con le tastiere, 12 icone, 6 colori, conferma),
+  sposta, elimina (conferma), ripristina predefiniti (conferma); nome unico ≤ 24, 1-50 comandi.
+- Fatto (Livellamento): tab Test carta / Mesh / Offset Z. **Test carta**: disegno del piatto con 5 punti (4 angoli a
+  `leveling.inset` mm dai bordi + centro, dal profilo stampante), ogni punto = alza a `leveling.zHop`, sposta, Z0,
+  poi M400+M114; "Punto successivo" in ordine, "Alza l'ugello"; richiede l'home (tracciato da ogni `G28`/`M84`
+  inviato, da chiunque). **Mesh**: "Leggi" = `M420 V`, parser dei report Marlin bilinear e MBL → heatmap vista dal
+  davanti (fila posteriore in alto), scala divergente attorno alla media (blu più basso, arancio più alto, minimo
+  ±0,05 mm), valori in ogni cella, estremi evidenziati, min/max/escursione; `G28`+`G29`+`M420 V` con `autolevel`;
+  mesh manuale guidata con `manualMesh` (`G29 S1`, Z più vicino/lontano con passi 0,025-0,5, `G29 S2`, fine su
+  "Mesh probing done." → rilettura; annulla = G28); salva `M500` con `eeprom`. **Offset Z**: babystep `M290` 0,01/0,05
+  con totale (anche in stampa, capability `babystepping`), offset sonda `M851` (letto all'apertura, impostato col
+  NumPad, con `zProbe`), `M500`. Bloccato durante un lavoro tranne il babystep.
+- Impostazioni **v6**: `terminal.filters` (default: nascosti temperature, busy, SD; visibili `ok` e posizione),
+  `leveling.inset/zHop/babystep/meshStep` (30 mm, 5 mm, 0,05, 0,05); icone/colori delle macro validati.
+  `defaultMacros()` estratto; operazioni generiche sulle liste in `core/lists.ts` (usate da preset e macro).
+  127 vitest (19 nuovi: parser mesh con output Marlin bilinear, con suddivisione, MBL spezzato in più messaggi e
+  punto non misurato; filtri terminale; macro; punti del test carta; migrazione v6); bundle JS 126,7 KB gzip.
+- Smoke test esteso (terminale, macro, livellamento, blocco in stampa), verde su Vite e sulla build dell'agent;
+  nuovo `ONLY=terminal,leveling` per eseguire solo alcuni passi. Screenshot controllati anche in italiano;
+  `docs/images/leveling-v0.7.0.png`.
+- Decisioni:
+  - Macro dentro la schermata Terminale (tab), come da sezione 1 ("Terminale + Macro"): le 8 icone restano quelle.
+  - G29 automatico solo con `autolevel` (`Cap:AUTOLEVEL`: ABL/UBL con sonda); lettura mesh anche con
+    `levelingData`/`manualMesh`; babystep solo con `Cap:BABYSTEPPING` (disabilitato con spiegazione se manca).
+  - Colori della heatmap relativi alla media (conta la planarità), valori grezzi nelle celle.
+  - Home "fatto" rilevato dal log `Send: G28` (per asse) invece di uno stato interno: vale anche per macro, file G-code
+    e altri client; `M84`/`M18` e la disconnessione lo azzerano.
+  - Offset sonda riletto a ogni apertura del pannello: un valore dal `history` può essere vecchio.
+- Deviazioni / scoperte:
+  - **Capability incomplete dopo un reload**: il `history` del log può contenere solo la coda del report M115, che
+    risultava "noto" ma senza `EEPROM` ecc. Ora `known` richiede la riga `FIRMWARE_NAME` (altrimenti M115 viene
+    richiesto di nuovo).
+  - `InputField` multilinea mostrava parte della 4ª riga nel padding (overflow tagliato al bordo del padding): ora
+    margine.
+  - Virtual Printer: nessun G29/M290/mesh, `M851` ignora i valori negativi (regex senza segno); `!!DEBUG:send`
+    permette di simulare le risposte del firmware (usato per i report mesh e "Mesh probing done.").
+  - Il test Move (S6) era instabile sulla build dell'agent (X 200 invece di 220): pausa fra i jog da 50 mm portata a
+    1,8 s.
+  - `Placeholder.svelte` rimosso (tutte le voci della sidebar hanno la loro schermata).
+  - Errore di processo: un `python3 --version` e un paio di edit con `perl` lanciati sull'host (nessun effetto sul
+    progetto); da non ripetere, usare Edit o Docker.
+- Problemi aperti / note per le prossime sessioni:
+  - S8: UI definitiva per le capability override (oggi solo via impostazioni salvate: il suggerimento "attiva mesh
+    manuale nelle impostazioni" della schermata Mesh rimanda lì), per `terminal.filters` e `leveling.*` (oggi nelle
+    rispettive schermate).
+  - S10: verificare sul Marlin reale il formato di `M420 V`/`G29 S0` (in particolare i punti non misurati), la
+    risposta di `M851`, `M290` con BABYSTEPPING, e se il firmware Tatara ha MESH_BED_LEVELING (→ `manualMesh` on).
+  - Storico comandi del terminale solo per sessione (non persistito).
+  - UBL (`G29` con Unified Bed Leveling) non gestito: il suo `M420 V` ha un altro formato.
+- Comandi utili: `docker compose -f dev/docker-compose.yml run --rm -e ONLY=leveling playwright`; simulare un report
+  mesh: `curl -H 'Content-Type: application/json' -d '{"commands":["!!DEBUG:send Bilinear Leveling Grid:","!!DEBUG:send 0 1","!!DEBUG:send 0 +0.100 -0.050","!!DEBUG:send 1 +0.020 +0.000","!!DEBUG:send ok"]}' http://127.0.0.1:8765/api/printer/command`
+  (la heatmap compare in Livellamento → Mesh anche senza capability).

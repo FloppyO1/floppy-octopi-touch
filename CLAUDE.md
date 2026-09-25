@@ -38,6 +38,7 @@ docker compose -f dev/docker-compose.yml run --rm agent-test     # ruff check + 
 docker compose -f dev/docker-compose.yml run --rm frontend-test  # svelte-check + tsc (node config) + vitest
 docker compose -f dev/docker-compose.yml run --rm build          # frontend/dist
 docker compose -f dev/docker-compose.yml run --rm playwright     # smoke test + screenshots -> dev/screenshots
+docker compose -f dev/docker-compose.yml run --rm -e ONLY=terminal,leveling playwright   # only some steps
 docker compose -f dev/docker-compose.yml run --rm shellcheck
 docker compose -f dev/docker-compose.yml down -v             # wipe OctoPrint/agent data (re-seed)
 ```
@@ -61,9 +62,13 @@ frontend/src/lib/core/         pure logic + tests: capabilities (M115), hostActi
                                printerState (phase, tone, plugins), settings (schema/defaults/migrations, accent),
                                format, gauge (ring geometry, heater tone), numpad, keyboard (layouts, editing),
                                tune (fan/M220/M221 from the log), layer (DLP), webcam, idle, notices, presets,
-                               move (jog direction + volume limits), filament (load/unload/purge G-code), chart
+                               lists (move/upsert/remove by id), move (jog direction + volume limits), filament
+                               (load/unload/purge G-code), chart, terminal (filters, line kinds, history), macros,
+                               mesh (LevelingParser: M420 V / G29 reports, stats, colour scale), leveling (paper
+                               test points, G-code, G28/M84 detection)
 frontend/src/lib/stores/       *.svelte.ts singletons (connection, printer/job, temperatures, files, usb, terminal,
-                               events, capabilities, prompt, server, settings, nav, clock, tune, notices, idle)
+                               events, capabilities, prompt, server, settings, nav, clock, tune, notices, idle,
+                               leveling)
                                + dataLayer.ts (socket wiring)
 frontend/src/lib/i18n/         en.json, it.json, index.svelte.ts (t(), setLocale())
 frontend/src/lib/ui/           design system: tokens.css, components (Button, Card, Modal, NumPad, OnScreenKeyboard, Thumb,
@@ -75,8 +80,10 @@ frontend/src/screens/          Home + home/ (JobView, IdleView, Preview, StatusR
                                (view state, items, FileGrid, FileDetail, UsbDetail, ImportProgress, actions.ts),
                                Temperature + temperature/ (HeaterCard, TempChart = uPlot, PresetManager/Editor),
                                Move + move/actions.ts, Filament + filament/ (flow.svelte.ts wizard state, Wizard,
-                               ManualPanel, FilamentSetup), heaterTarget.ts, System (temporary), Placeholder;
-                               dev/Gallery + dev/Debug (dev only)
+                               ManualPanel, FilamentSetup), Terminal + terminal/ (view state, Console, MacroGrid,
+                               MacroManager/Editor, macroLook.ts, actions.ts), Leveling + leveling/ (view state,
+                               PaperTest, MeshPanel, MeshMap heatmap, ZPanel, actions.ts), heaterTarget.ts,
+                               System (temporary); dev/Gallery + dev/Debug (dev only)
 frontend/preview.html          1024×600 frame around the app (also in the production build)
 dev/docker-compose.yml         dev stack + tool services; dev/docker/*.Dockerfile
 dev/octoprint/                 seed config.yaml + init.sh for the OctoPrint volume
@@ -140,19 +147,28 @@ deploy/, scripts/              placeholders (session 9)
 
 - Virtual Printer and moves: it applies `G90`/`G91` at once but buffers `G0`/`G1`, so a jog sent while earlier moves
   are still queued can run as an absolute move there; it also answers `M114` immediately (hence `M400` before
-  every `M114` in the app). Real Marlin is sequential. In Playwright, leave ~1.3 s between 50 mm jogs.
+  every `M114` in the app). Real Marlin is sequential. In Playwright, leave ~1.8 s between 50 mm jogs (1.3 s was
+  flaky on the agent build).
 - OctoPrint fires `PositionUpdate` (x, y, z, e, t, f, reason) for every M114 answer: the filament wizard uses
   `M400` + `M114` to know when its moves are done.
 - A Card's `{#snippet actions()}` shadows a script variable called `actions` inside the Card: name it otherwise.
 - `Wizard.svelte` and a `wizard.svelte.ts` in the same folder clash (case-insensitive file names): that is why
   the wizard state lives in `filament/flow.svelte.ts`.
+- Fake firmware output: `!!DEBUG:send <line>` makes the Virtual Printer send `<line>` back (do not rely on
+  leading spaces or empty lines). The smoke test injects mesh reports and "Mesh probing done." this way.
+  The Virtual Printer has no mesh, no `G29`, no `M290`, and its `M851` ignores negative values.
+- Firmware features the Virtual Printer lacks (manual mesh, probe, babystepping) are tested by forcing capability
+  overrides in the stored settings (`PUT /local/settings`, then reload): see `setOverrides()` in the smoke test,
+  which also puts them back to `auto`.
+- Values parsed from the `history` log replay may be stale (e.g. an old `M851` answer): screens that show firmware
+  state ask again when they open. Capabilities count as known only after a `FIRMWARE_NAME` line.
 
 ## Current state
 
-v0.6.0 (session 6): Temperature screen (heater cards, all off, uPlot chart 5/15/30 min, preset CRUD with reorder
-and restore), Move screen (jog 0.1/1/10/50 mm clamped to the printer profile volume once M114 is known, homing,
-motors off, jog speeds), Filament screen (wizard load/unload/M600 with M701/M702 or G-code sequences, extruder
-setup, manual extrude/retract with cold extrusion guard); Move/Filament locked while printing; settings schema v5.
-Files (session 5), Home/screensaver/notices (session 4), design system and shell (session 3, accent teal).
-Next: session 7 (Terminal, Macros, Leveling/Mesh).
+v0.7.0 (session 7): Terminal screen (filtered live log, pause, auto-scroll, in-app G-code keyboard, history, quick
+commands) with a Macros tab (big buttons, CRUD with icon/colour/confirm, restore defaults); Leveling screen (paper
+test at 4 corners + centre, mesh heatmap from `M420 V` for bilinear/MBL, guided MBL `G29 S1/S2`, automatic `G29`,
+babystep `M290`, probe offset `M851`, `M500`), locked while printing except babystep; settings schema v6.
+Temperature/Move/Filament (session 6), Files (session 5), Home/screensaver/notices (session 4), design system and
+shell (session 3, accent teal). Next: session 8 (System and settings).
 See `docs/PLAN.md` for details and notes between sessions.
