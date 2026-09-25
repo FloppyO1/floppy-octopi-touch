@@ -14,3 +14,4 @@ export { settings } from './settings.svelte';
 export { temperatures } from './temperatures.svelte';
 export { terminal } from './terminal.svelte';
 export { tune } from './tune.svelte';
+export { usb } from './usb.svelte';

@@ -7,7 +7,6 @@
   import Printer from '@lucide/svelte/icons/printer';
   import Square from '@lucide/svelte/icons/square';
   import Waves from '@lucide/svelte/icons/waves';
-  import { findFile, thumbnailUrl } from '../../lib/core/files';
   import { formatClock, formatDuration } from '../../lib/core/format';
   import { t } from '../../lib/i18n/index.svelte';
   import { files, job, printer, settings, tune } from '../../lib/stores';
@@ -18,15 +17,12 @@
   import StatusRows from './StatusRows.svelte';
 
   const paused = $derived(printer.phase === 'paused' || printer.phase === 'pausing');
-  const entry = $derived(
-    job.file?.path ? findFile(job.file.origin === 'sdcard' ? files.sdcard : files.local, job.file.path) : null,
-  );
 </script>
 
 <div class="bottom">
   <Card class="job" title={t('job.title')} icon={Printer}>
     <div class="job-body">
-      <Preview thumbnail={thumbnailUrl(entry)} />
+      <Preview thumbnail={files.thumbnailFor(job.file)} />
       <div class="job-info">
         <p class="file" data-testid="job-file">{job.file ? (job.file.display ?? job.file.name) : t('job.none')}</p>
         <div class="bar"><div class="fill" class:paused style:width="{job.completion ?? 0}%"></div></div>

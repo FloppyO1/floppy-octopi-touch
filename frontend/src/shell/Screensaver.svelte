@@ -9,7 +9,7 @@
   import { heaterTone } from '../lib/core/gauge';
   import { phaseTone } from '../lib/core/printerState';
   import { i18n, t } from '../lib/i18n/index.svelte';
-  import { clock, connection, idle, job, printer, settings, temperatures } from '../lib/stores';
+  import { clock, connection, files, idle, job, printer, settings, temperatures } from '../lib/stores';
   import { dialogs } from '../lib/ui/dialogs.svelte';
 
   const mode = $derived(idle.mode);
@@ -20,6 +20,16 @@
   );
   const phase = $derived(connection.live ? t(`phase.${printer.phase}`) : t('status.offline'));
   const round = (v: number | null | undefined) => (v == null ? '—' : Math.round(v).toString());
+
+  // Optional (default off): the file's thumbnail next to the percentage; none = the plain layout.
+  const thumbnail = $derived(
+    settings.value.screensaver.showThumbnail && printer.busy ? files.thumbnailFor(job.file) : null,
+  );
+  let thumbFailed = $state(false);
+  $effect(() => {
+    void thumbnail;
+    thumbFailed = false;
+  });
 
   // Open dialogs (NumPad, confirmations…) are cancelled when the screen goes to sleep.
   $effect(() => {
@@ -48,10 +58,17 @@
     {#if mode === 'screensaver'}
       {#if printer.busy}
         <div class="printing tone-{phaseTone(printer.phase)}">
-          <p class="phase">{phase}</p>
-          <p class="percent tabular" data-testid="saver-progress">
-            {job.completion === null ? '—' : job.completion.toFixed(0)}<span>%</span>
-          </p>
+          <div class="headline">
+            {#if thumbnail && !thumbFailed}
+              <img class="thumb" src={thumbnail} alt="" onerror={() => (thumbFailed = true)} data-testid="saver-thumbnail" />
+            {/if}
+            <div class="progress">
+              <p class="phase">{phase}</p>
+              <p class="percent tabular" data-testid="saver-progress">
+                {job.completion === null ? '—' : job.completion.toFixed(0)}<span>%</span>
+              </p>
+            </div>
+          </div>
           <div class="bar"><div class="fill" style:width="{job.completion ?? 0}%"></div></div>
           <p class="file">{job.file?.display ?? job.file?.name ?? ''}</p>
           <p class="times tabular">
@@ -127,6 +144,25 @@
     align-items: center;
     gap: var(--sp-2);
     width: 820px;
+  }
+  .headline {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--sp-6);
+  }
+  .progress {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--sp-2);
+  }
+  .thumb {
+    width: 220px;
+    height: 220px;
+    object-fit: contain;
+    border-radius: var(--r-lg);
+    background: var(--surface);
   }
   .phase {
     color: var(--tone);

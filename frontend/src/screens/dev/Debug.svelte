@@ -20,6 +20,7 @@
     settings,
     temperatures,
     terminal,
+    usb,
   } from '../../lib/stores';
 
   let now = $state(new Date());
@@ -234,7 +235,7 @@
         {t('debug.filesSummary', {
           local: files.local.length,
           sd: printer.sdReady ? files.sdcard.length : '—',
-          usb: files.usbStatus === 'ready' ? files.usb.length : t(`usb.${files.usbStatus}`),
+          usb: usb.mounts.length ? usb.files.length : t('usb.unmounted'),
         })}
       </p>
       <ul class="small">

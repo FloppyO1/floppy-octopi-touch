@@ -21,6 +21,7 @@ import { settings } from './settings.svelte';
 import { temperatures } from './temperatures.svelte';
 import { terminal } from './terminal.svelte';
 import { tune } from './tune.svelte';
+import { usb } from './usb.svelte';
 
 const HEALTH_RETRY_MS = 5000;
 
@@ -31,6 +32,7 @@ const FILE_EVENTS = new Set([
   'FolderAdded',
   'FolderRemoved',
   'FileDeselected',
+  'MetadataAnalysisFinished',
 ]);
 
 function handleEvent({ type, payload }: EventPayload): void {
@@ -109,7 +111,6 @@ async function loadInitialState(): Promise<void> {
     server.loadSettings(),
     server.loadProfile(),
     files.refresh(),
-    files.refreshUsb(),
   ]);
   await server.loadLayerValues();
 }
@@ -138,6 +139,7 @@ export function startDataLayer(): void {
     onMessage: handleMessage,
   });
   void settings.load();
+  usb.start();
   void waitForOctoPrint();
 }
 
@@ -145,6 +147,7 @@ export function stopDataLayer(): void {
   if (healthTimer) clearTimeout(healthTimer);
   healthTimer = null;
   socket?.close();
+  usb.stop();
   socket = null;
   connection.socket = 'closed';
 }

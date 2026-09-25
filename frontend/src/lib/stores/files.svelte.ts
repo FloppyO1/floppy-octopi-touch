@@ -1,13 +1,9 @@
-/** Files from every source: OctoPrint local storage, the printer's SD card, the Pi's USB stick. */
-import { getUsbFiles } from '../api/agent';
-import { HttpError } from '../api/http';
+/** Files of OctoPrint's local storage and of the printer's SD card (USB sticks: `usb` store). */
 import { files as filesApi, printer as printerApi } from '../api/octoprint';
-import type { FileEntry, FileOrigin, UsbFile } from '../api/types';
-import { splitByOrigin } from '../core/files';
+import type { FileEntry, FileOrigin, JobFile } from '../api/types';
+import { findFile, splitByOrigin, thumbnailUrl } from '../core/files';
 
 export type LoadStatus = 'idle' | 'loading' | 'ready' | 'error';
-/** `unavailable` = the agent has no USB endpoint (before session 5) or no stick support. */
-export type UsbStatus = 'unavailable' | 'unmounted' | 'ready' | 'error';
 
 const REFRESH_DEBOUNCE_MS = 500;
 
@@ -15,8 +11,6 @@ class FilesStore {
   /** Recursive tree of the local storage (folders have `children`). */
   local = $state.raw<FileEntry[]>([]);
   sdcard = $state.raw<FileEntry[]>([]);
-  usb = $state.raw<UsbFile[]>([]);
-  usbStatus = $state<UsbStatus>('unavailable');
   status = $state<LoadStatus>('idle');
   free = $state<number | null>(null);
   total = $state<number | null>(null);
@@ -44,24 +38,25 @@ class FilesStore {
     this.timer = setTimeout(() => void this.refresh(), REFRESH_DEBOUNCE_MS);
   }
 
-  async refreshUsb(): Promise<void> {
-    try {
-      const listing = await getUsbFiles();
-      this.usb = listing.files;
-      this.usbStatus = listing.mounted ? 'ready' : 'unmounted';
-    } catch (error) {
-      this.usb = [];
-      this.usbStatus = error instanceof HttpError && error.status === 404 ? 'unavailable' : 'error';
-    }
+  find(origin: FileOrigin, path: string): FileEntry | null {
+    return findFile(origin === 'sdcard' ? this.sdcard : this.local, path);
   }
 
-  /**
-   * Asks the printer to re-read its SD card (M20); OctoPrint then fires UpdatedFiles.
-   * Never while printing: the serial line is busy and SD listing can stall the printer.
-   */
+  /** Thumbnail of the job's file (the listing entry knows about the Slicer Thumbnails plugin). */
+  thumbnailFor(file: JobFile | null | undefined): string | null {
+    if (!file?.path || !file.origin) return null;
+    return thumbnailUrl(this.find(file.origin, file.path) ?? { ...file, origin: file.origin, path: file.path });
+  }
+
   /** Selects a file and starts printing it (callers confirm first: the bed must be clear). */
   print = (origin: FileOrigin, path: string) => filesApi.select(origin, path, true);
+  select = (origin: FileOrigin, path: string) => filesApi.select(origin, path, false);
+  remove = (origin: FileOrigin, path: string) => filesApi.remove(origin, path);
 
+  /**
+   * SD card commands (M21/M20/M22); OctoPrint then fires UpdatedFiles. Never while printing:
+   * the serial line is busy and listing the card can stall the printer.
+   */
   refreshSd = () => printerApi.sd.refresh();
   initSd = () => printerApi.sd.init();
   releaseSd = () => printerApi.sd.release();

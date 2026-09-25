@@ -36,3 +36,16 @@ export function formatClock(date: Date, hour12 = false, seconds = false): string
     hourCycle: hour12 ? 'h12' : 'h23',
   }).format(date);
 }
+
+/** Date and time of a file (`date` in seconds since the epoch), e.g. "25 Sep 2026, 14:05". */
+export function formatFileDate(seconds: number | null | undefined, locale?: string, hour12 = false): string {
+  if (!seconds) return '—';
+  return new Intl.DateTimeFormat(locale, {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: hour12 ? 'h12' : 'h23',
+  }).format(new Date(seconds * 1000));
+}

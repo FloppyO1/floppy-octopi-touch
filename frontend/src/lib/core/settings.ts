@@ -6,8 +6,9 @@
  * fields added later always exist and fields with a wrong type are reset.
  */
 import { defaultCapabilityOverrides, type CapabilityOverrides } from './capabilities';
+import { SORT_KEYS, type SortDirection, type SortKey } from './files';
 
-export const SETTINGS_VERSION = 3;
+export const SETTINGS_VERSION = 4;
 
 export type Language = 'en' | 'it';
 export const LANGUAGES: readonly Language[] = ['en', 'it'];
@@ -41,12 +42,17 @@ export type ExtruderType = 'unknown' | 'direct' | 'bowden';
 export const HOME_PREVIEWS = ['thumbnail', 'webcam'] as const;
 export type HomePreview = (typeof HOME_PREVIEWS)[number];
 
+/** File browser: thumbnail grid or compact list. */
+export const FILE_VIEWS = ['grid', 'list'] as const;
+export type FileView = (typeof FILE_VIEWS)[number];
+
 export interface Settings {
   schemaVersion: number;
   language: Language;
   clock24h: boolean;
   accent: Accent;
-  screensaver: { enabled: boolean; timeoutMin: number };
+  /** `showThumbnail`: the file's thumbnail next to the progress while printing. */
+  screensaver: { enabled: boolean; timeoutMin: number; showThumbnail: boolean };
   /** HDMI output off when idle (never while printing). */
   screenOff: { enabled: boolean; timeoutMin: number };
   temperature: {
@@ -74,6 +80,7 @@ export interface Settings {
   /** Manual stream URL; empty = the webcam configured in OctoPrint. */
   webcam: { url: string };
   home: { preview: HomePreview };
+  files: { sort: SortKey; direction: SortDirection; view: FileView };
 }
 
 export function defaultSettings(): Settings {
@@ -82,7 +89,7 @@ export function defaultSettings(): Settings {
     language: 'en',
     clock24h: true,
     accent: 'teal',
-    screensaver: { enabled: true, timeoutMin: 5 },
+    screensaver: { enabled: true, timeoutMin: 5, showThumbnail: false },
     screenOff: { enabled: false, timeoutMin: 30 },
     temperature: {
       confirmAbove: { hotend: 250, bed: 90 },
@@ -120,6 +127,7 @@ export function defaultSettings(): Settings {
     capabilities: { overrides: defaultCapabilityOverrides() },
     webcam: { url: '' },
     home: { preview: 'thumbnail' },
+    files: { sort: 'date', direction: 'desc', view: 'grid' },
   };
 }
 
@@ -134,6 +142,8 @@ const MIGRATIONS: Record<number, (doc: Doc) => Doc> = {
   1: (doc) => doc,
   // v3 (session 4): `webcam` and `home` added, both from the defaults.
   2: (doc) => doc,
+  // v4 (session 5): `files` and `screensaver.showThumbnail` (default off) from the defaults.
+  3: (doc) => doc,
 };
 
 const isObject = (v: unknown): v is Doc => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -173,6 +183,9 @@ export function migrateSettings(raw: unknown): MigrationResult {
   if (!LANGUAGES.includes(settings.language)) settings.language = 'en';
   if (!ACCENTS.includes(settings.accent)) settings.accent = 'teal';
   if (!HOME_PREVIEWS.includes(settings.home.preview)) settings.home.preview = 'thumbnail';
+  if (!SORT_KEYS.includes(settings.files.sort)) settings.files.sort = 'date';
+  if (!['asc', 'desc'].includes(settings.files.direction)) settings.files.direction = 'desc';
+  if (!FILE_VIEWS.includes(settings.files.view)) settings.files.view = 'grid';
   // Array items are user data: drop malformed ones instead of failing later in the UI.
   settings.presets = settings.presets.filter(
     (p) => isObject(p) && typeof p.id === 'string' && typeof p.name === 'string' &&

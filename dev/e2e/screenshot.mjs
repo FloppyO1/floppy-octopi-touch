@@ -1,6 +1,7 @@
 // Smoke test + screenshots at the target resolution (1024x600).
 // Run with: docker compose -f dev/docker-compose.yml run --rm playwright
 // RECONNECT_TEST=1: also waits for the socket to drop and come back (restart OctoPrint meanwhile).
+import { unlinkSync, writeFileSync } from 'node:fs';
 import { chromium } from 'playwright';
 
 const BASE_URL = process.env.BASE_URL ?? 'http://frontend:5173';
@@ -145,7 +146,8 @@ async function hostPrompt(page) {
   await page.evaluate(() => window.__fot.settings.update((s) => (s.capabilities.overrides.promptSupport = 'auto')));
 }
 
-// A short job (~25 s on the Virtual Printer, thanks to G4 dwells) uploaded by the test itself.
+// A short job (~25 s on the Virtual Printer, thanks to G4 dwells) uploaded by the test itself,
+// with the thumbnail of a sample so the agent's extraction shows up on Home and the screensaver.
 const SMOKE_FILE = 'smoke-test.gcode';
 const SMOKE_GCODE = [
   '; FloppyOctoTouch smoke test',
@@ -154,6 +156,17 @@ const SMOKE_GCODE = [
   ...Array.from({ length: 12 }, (_, i) => [`G1 X${20 + i * 5} Y20 F3000`, 'G4 S2']).flat(),
   'M107',
 ].join('\n');
+const THUMBNAIL_SAMPLE = 'calibration-cube_prusaslicer.gcode';
+
+/** The thumbnail comment blocks of a sample in OctoPrint's storage. */
+const sampleThumbnail = (page) =>
+  page.evaluate(async (name) => {
+    const text = await (await fetch(`/downloads/files/local/${name}`)).text();
+    const lines = text.split('\n');
+    const start = lines.findIndex((l) => l.startsWith('; thumbnail begin'));
+    const end = lines.findLastIndex((l) => l.startsWith('; thumbnail end'));
+    return lines.slice(start, end + 1).join('\n');
+  }, THUMBNAIL_SAMPLE);
 
 const terminalHas = (page, text, timeout = 15_000) =>
   page.waitForFunction((t) => window.__fot.terminal.lines.some((l) => l.text.includes(t)), text, { timeout });
@@ -164,16 +177,177 @@ async function sliderPreset(page, label) {
   await page.waitForSelector('[data-testid=slider-dialog]', { state: 'detached' });
 }
 
-async function uploadSmokeFile(page) {
+async function uploadFile(page, name, content, folder = '') {
   const status = await page.evaluate(
-    async ([name, content]) => {
+    async ([name, content, folder]) => {
       const form = new FormData();
       form.append('file', new Blob([content], { type: 'text/plain' }), name);
+      if (folder) form.append('path', folder);
       return (await fetch('/api/files/local', { method: 'POST', body: form })).status;
     },
-    [SMOKE_FILE, SMOKE_GCODE],
+    [name, content, folder],
   );
-  if (status !== 201) throw new Error(`upload failed: HTTP ${status}`);
+  if (status !== 201) throw new Error(`upload of ${name} failed: HTTP ${status}`);
+}
+
+const uploadSmokeFile = async (page) =>
+  uploadFile(page, SMOKE_FILE, `${await sampleThumbnail(page)}\n${SMOKE_GCODE}`);
+
+const BENCHY = '3dbenchy_prusaslicer.gcode';
+const DELETE_FILE = 'smoke-delete.gcode';
+const USB_FILE = 'smoke-usb.gcode';
+// dev/fake-usb, mounted read-only in the agent as /media/usb0 and writable here.
+const FAKE_USB = '/fake-usb';
+
+const itemNames = (page) =>
+  page.$$eval('[data-testid=files-content] [data-testid^=item-]', (els) =>
+    els.map((el) => el.dataset.testid.slice('item-'.length)),
+  );
+const waitThumb = (page, item) =>
+  page.waitForFunction((id) => document.querySelector(`[data-testid="${id}"] img`)?.naturalWidth > 0, `item-${item}`, {
+    timeout: 15_000,
+  });
+const closeModal = async (page, id) => {
+  await page.keyboard.press('Escape');
+  await page.waitForSelector(`[data-testid=${id}]`, { state: 'detached' });
+};
+
+// Files: browse, folders, sort, list view, search with the keyboard, detail, delete, SD card, USB import/eject.
+async function filesScreen(page) {
+  await page.goto(`${BASE_URL}/#/files`);
+  await page.waitForSelector('[data-testid=connection-overlay]', { state: 'detached', timeout: 60_000 });
+  // Start from the defaults (a failed run may have left other preferences behind).
+  if (DEV) {
+    await page.evaluate(() =>
+      window.__fot.settings.update((s) => Object.assign(s.files, { sort: 'date', direction: 'desc', view: 'grid' })),
+    );
+  }
+  await page.waitForSelector('[data-testid=file-grid]');
+  await waitThumb(page, BENCHY);
+  await page.waitForTimeout(400);
+  await page.screenshot({ path: `${OUT}/files-grid.png` });
+
+  await page.getByTestId('item-examples').click();
+  await waitText(page, 'breadcrumb', (t) => t.includes('examples'));
+  await page.getByTestId('item-coaster-copy.gcode').waitFor();
+  await page.getByTestId('folder-up').click();
+  await page.getByTestId(`item-${BENCHY}`).waitFor();
+  log('folders', 'opened examples/, back to the root');
+
+  await page.getByTestId('sort-size').click();
+  let names = await itemNames(page);
+  if (names.filter((n) => n.endsWith('.gcode'))[0] !== BENCHY) throw new Error(`size sort: ${names}`);
+  await page.getByTestId('sort-name').click();
+  names = (await itemNames(page)).filter((n) => n.endsWith('.gcode'));
+  if (names.join() !== [...names].sort((a, b) => a.localeCompare(b)).join()) throw new Error(`name sort: ${names}`);
+  await page.getByTestId('files-view').click();
+  await page.waitForSelector('[data-testid=file-list]');
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: `${OUT}/files-list.png` });
+  await page.getByTestId('files-view').click();
+  await page.waitForSelector('[data-testid=file-grid]');
+  await page.getByTestId('sort-date').click(); // back to the default, newest first
+  log('sort/view', 'size and name order, list and grid');
+
+  // Search through the on-screen keyboard sheet (typed on the physical keyboard, Enter submits).
+  await page.getByTestId('files-search').click();
+  await page.waitForSelector('[data-testid=text-input]');
+  await page.keyboard.type('coaster');
+  await page.waitForTimeout(300); // sheet fade-in
+  await page.screenshot({ path: `${OUT}/files-search-keyboard.png` });
+  await page.keyboard.press('Enter');
+  await page.waitForSelector('[data-testid=search-chip]');
+  names = await itemNames(page);
+  if (names.length !== 2 || !names.every((n) => n.includes('coaster'))) throw new Error(`search: ${names}`);
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: `${OUT}/files-search.png` });
+  await page.getByTestId('search-clear').click();
+  log('search', `"coaster" → ${names.join(', ')}`);
+
+  // Detail of the real PrusaSlicer benchy: thumbnail and slicer analysis.
+  await page.getByTestId(`item-${BENCHY}`).click();
+  await page.waitForSelector('[data-testid=file-detail]');
+  await waitText(page, 'detail-estimate', (t) => /\d/.test(t));
+  await page.waitForFunction(() => document.querySelector('[data-testid=file-detail] img')?.naturalWidth > 0);
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: `${OUT}/file-detail.png` });
+  log('detail', (await text(page, 'detail-estimate'))?.trim());
+  await closeModal(page, 'file-detail');
+
+  await uploadFile(page, DELETE_FILE, SMOKE_GCODE);
+  await page.getByTestId(`item-${DELETE_FILE}`).click();
+  await page.getByTestId('detail-delete').click();
+  await page.waitForSelector('[data-testid=confirm-dialog]');
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: `${OUT}/files-delete.png` });
+  await page.getByTestId('confirm-dialog').getByRole('button', { name: 'Delete', exact: true }).click();
+  await page.getByTestId(`item-${DELETE_FILE}`).waitFor({ state: 'detached', timeout: 15_000 });
+  log('delete', 'confirmed, file gone from the list');
+
+  // Printer SD card (the Virtual Printer has one).
+  await page.getByTestId('source-sdcard').click();
+  if (await page.getByTestId('sd-init').count()) await page.getByTestId('sd-init').click();
+  await page.getByTestId('sd-refresh').waitFor({ timeout: 15_000 });
+  // OctoPrint lists the card only after an M20: refresh if it has not happened yet.
+  const sdFile = page.getByTestId('item-sd-cube.gcode');
+  if (!(await sdFile.waitFor({ timeout: 3000 }).then(() => true, () => false))) {
+    await page.getByTestId('sd-refresh').click();
+    await sdFile.waitFor({ timeout: 15_000 });
+  }
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: `${OUT}/files-sd.png` });
+  log('sd card', `ready, ${(await itemNames(page)).join(', ')}`);
+
+  // USB stick: a file appears after a refresh, is imported into examples/ and the stick ejected.
+  await api(page, 'DELETE', `/api/files/local/examples/${USB_FILE}`);
+  writeFileSync(`${FAKE_USB}/${USB_FILE}`, `${await sampleThumbnail(page)}\n${SMOKE_GCODE}\n`);
+  await page.getByTestId('source-usb').click();
+  await page.getByTestId('files-refresh').click();
+  await page.getByTestId(`item-${USB_FILE}`).waitFor({ timeout: 15_000 });
+  await waitThumb(page, USB_FILE);
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: `${OUT}/files-usb.png` });
+  await page.getByTestId(`item-${USB_FILE}`).click();
+  await page.waitForSelector('[data-testid=usb-detail]');
+  await page.getByTestId('usb-destination').click();
+  await page.getByRole('option', { name: 'examples', exact: true }).click();
+  await waitText(page, 'usb-destination', (t) => t.includes('examples'));
+  await page.waitForTimeout(400);
+  await page.screenshot({ path: `${OUT}/usb-detail.png` });
+  await page.getByTestId('usb-import').click();
+  await page.waitForSelector('[data-testid=file-detail]', { timeout: 30_000 });
+  await waitText(page, 'breadcrumb', (t) => t.includes('examples'));
+  log('usb import', `${USB_FILE} → examples/, detail of the local copy`);
+  await closeModal(page, 'file-detail');
+
+  if (DEV) {
+    // The real import of a few KB is too fast to catch: show the dialog with a fake progress.
+    await page.evaluate(() => {
+      const file = window.__fot.usb.files[0];
+      window.__fot.usb.importing = { file, sent: Math.round(file.size * 0.42), total: file.size };
+    });
+    await page.waitForSelector('[data-testid=import-progress]');
+    await page.waitForTimeout(400);
+    await page.screenshot({ path: `${OUT}/import-progress.png` });
+    await page.evaluate(() => (window.__fot.usb.importing = null));
+    await page.waitForSelector('[data-testid=import-progress]', { state: 'detached' });
+  }
+
+  await page.getByTestId('source-usb').click();
+  await page.locator('[data-testid^=usb-eject-]').click();
+  await page.waitForSelector('[data-testid=files-empty]');
+  await page.getByText('You can remove the USB stick now.').waitFor();
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: `${OUT}/files-usb-ejected.png` });
+  log('usb eject', 'stick gone, toast shown');
+  // In dev ejecting only hides the stick until its content changes: that is a new insertion (SSE event).
+  unlinkSync(`${FAKE_USB}/${USB_FILE}`);
+  await page.getByText('USB stick connected').waitFor({ timeout: 15_000 });
+  log('usb insert', 'toast from the agent event stream');
+  await api(page, 'DELETE', `/api/files/local/examples/${USB_FILE}`);
+
+  await page.getByTestId('source-local').click();
+  if (DEV) await page.evaluate(() => window.__fot.settings.flush());
 }
 
 // Idle Home → print from the recent files → live overrides → pause/resume → webcam → print done notice.
@@ -246,12 +420,24 @@ async function printFlow(page) {
   log('webcam', 'stream shown in the preview and enlarged');
 
   if (DEV) {
-    await page.evaluate(() => window.__fot.idle.sleep());
-    await page.waitForSelector('[data-testid=screensaver][data-mode=screensaver]');
-    await page.waitForTimeout(600);
-    await page.screenshot({ path: `${OUT}/saver-printing.png` });
-    await page.mouse.click(512, 540);
-    await page.waitForSelector('[data-testid=screensaver]', { state: 'detached' });
+    // Screensaver while printing, as is and with the optional thumbnail.
+    for (const thumb of [false, true]) {
+      await page.evaluate((on) => window.__fot.settings.update((s) => (s.screensaver.showThumbnail = on)), thumb);
+      await page.evaluate(() => window.__fot.idle.sleep());
+      await page.waitForSelector('[data-testid=screensaver][data-mode=screensaver]');
+      if (thumb) {
+        await page.waitForFunction(() => document.querySelector('[data-testid=screensaver] img')?.naturalWidth > 0);
+      }
+      await page.waitForTimeout(600);
+      await page.screenshot({ path: `${OUT}/saver-printing${thumb ? '-thumb' : ''}.png` });
+      await page.mouse.click(512, 540);
+      await page.waitForSelector('[data-testid=screensaver]', { state: 'detached' });
+    }
+    await page.evaluate(async () => {
+      window.__fot.settings.update((s) => (s.screensaver.showThumbnail = false));
+      await window.__fot.settings.flush();
+    });
+    log('saver thumbnail', 'printing screensaver without and with the thumbnail');
   }
 
   await page.waitForSelector('[data-testid=notice]', { timeout: 120_000 });
@@ -328,11 +514,12 @@ async function gallery(page) {
 try {
   const page = await browser.newPage({ viewport: VIEWPORT });
   page.on('console', (msg) => {
-    // /local/usb does not exist before session 5.
+    // 404s are expected: files without a thumbnail, the agent fallback for them.
     if (msg.type() === 'error' && !msg.text().includes('404')) console.error('[browser]', msg.text());
   });
   if (DEV) await debugPage(page);
   await shell(page);
+  await filesScreen(page);
   await printFlow(page);
   if (DEV) await screensaver(page);
   await kiosk(page);

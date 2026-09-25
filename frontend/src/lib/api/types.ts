@@ -271,15 +271,30 @@ export interface AgentHealth {
   octoprint: { reachable: boolean; authorized: boolean; version: string | null; error?: string };
 }
 
-/** `GET /local/usb` (agent endpoint implemented in session 5). */
+/** A USB stick mounted on the Pi (`id` = mount point name, e.g. `usb0`). */
+export interface UsbMount {
+  id: string;
+  name: string;
+}
+
+/** A G-code file on a stick; `path` is relative to the mount, `date` in seconds. */
 export interface UsbFile {
+  mount: string;
   path: string;
   name: string;
   size: number;
   date: number;
 }
 
+/** `GET /local/usb`. */
 export interface UsbListing {
-  mounted: boolean;
+  mounts: UsbMount[];
   files: UsbFile[];
+}
+
+/** Last line of the `POST /local/usb/import` stream. */
+export interface UsbImportResult {
+  name: string;
+  /** Path in OctoPrint's local storage. */
+  path: string;
 }

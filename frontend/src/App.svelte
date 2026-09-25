@@ -30,18 +30,22 @@
     (window as unknown as { __fot: unknown }).__fot = { ...stores, toast };
   }
 
-  let offNotification: (() => void) | undefined;
+  let unsubscribe: (() => void)[] = [];
   onMount(() => {
     stores.startDataLayer();
     stores.clock.start();
     if (!isDevPage) stores.idle.start();
-    offNotification = stores.events.on('host:notification', (event) => {
-      const message = String(event.payload?.message ?? '');
-      if (message) toast.show(t('prompt.notification', { message }));
-    });
+    unsubscribe = [
+      stores.events.on('host:notification', (event) => {
+        const message = String(event.payload?.message ?? '');
+        if (message) toast.show(t('prompt.notification', { message }));
+      }),
+      stores.events.on('usb:inserted', () => toast.show(t('files.usbInserted'), { tone: 'ok' })),
+      stores.events.on('usb:removed', () => toast.show(t('files.usbRemoved'))),
+    ];
   });
   onDestroy(() => {
-    offNotification?.();
+    for (const off of unsubscribe) off();
     stores.idle.stop();
     stores.clock.stop();
     stores.stopDataLayer();

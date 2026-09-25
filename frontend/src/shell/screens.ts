@@ -10,6 +10,7 @@ import Thermometer from '@lucide/svelte/icons/thermometer';
 import type { Component } from 'svelte';
 import type { ScreenId } from '../lib/stores/nav.svelte';
 import type { IconComponent } from '../lib/ui/types';
+import Files from '../screens/Files.svelte';
 import Home from '../screens/Home.svelte';
 import Placeholder from '../screens/Placeholder.svelte';
 import System from '../screens/System.svelte';
@@ -24,7 +25,7 @@ export interface ScreenDef {
 
 export const SCREENS: readonly ScreenDef[] = [
   { id: 'home', icon: House, component: Home, needsPrinter: true },
-  { id: 'files', icon: FolderOpen, component: Placeholder, needsPrinter: false },
+  { id: 'files', icon: FolderOpen, component: Files, needsPrinter: false },
   { id: 'temperature', icon: Thermometer, component: Placeholder, needsPrinter: true },
   { id: 'move', icon: Move, component: Placeholder, needsPrinter: true },
   { id: 'filament', icon: Spool, component: Placeholder, needsPrinter: true },

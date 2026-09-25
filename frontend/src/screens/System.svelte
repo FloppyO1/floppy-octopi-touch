@@ -2,12 +2,14 @@
   // Temporary System screen (session 3): language, accent colour and version until the real screen (session 8).
   import Info from '@lucide/svelte/icons/info';
   import Languages from '@lucide/svelte/icons/languages';
+  import MonitorPlay from '@lucide/svelte/icons/monitor-play';
   import Palette from '@lucide/svelte/icons/palette';
   import { ACCENTS, LANGUAGES } from '../lib/core/settings';
   import { i18n, t } from '../lib/i18n/index.svelte';
   import { connection, settings } from '../lib/stores';
   import Button from '../lib/ui/Button.svelte';
   import Card from '../lib/ui/Card.svelte';
+  import Toggle from '../lib/ui/Toggle.svelte';
 
   const LANGUAGE_NAMES: Record<string, string> = { en: 'English', it: 'Italiano' };
 </script>
@@ -25,6 +27,18 @@
           {LANGUAGE_NAMES[locale]}
         </Button>
       {/each}
+    </div>
+  </Card>
+
+  <!-- Temporary switch (session 5); the full screensaver settings come with session 8. -->
+  <Card title={t('system.screensaver')} icon={MonitorPlay}>
+    <div data-testid="saver-thumbnail-toggle">
+      <Toggle
+        label={t('system.saverThumbnail')}
+        hint={t('system.saverThumbnailHint')}
+        checked={settings.value.screensaver.showThumbnail}
+        onchange={(on) => settings.update((s) => (s.screensaver.showThumbnail = on))}
+      />
     </div>
   </Card>
 

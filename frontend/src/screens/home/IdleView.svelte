@@ -15,6 +15,7 @@
   import { files, job, nav, printer, settings } from '../../lib/stores';
   import Button from '../../lib/ui/Button.svelte';
   import Card from '../../lib/ui/Card.svelte';
+  import Thumb from '../../lib/ui/Thumb.svelte';
   import { toast } from '../../lib/ui/toast.svelte';
   import { cooldown, preheat } from '../heaterTarget';
   import { startPrint } from './actions';
@@ -88,10 +89,10 @@
     {#if rows.length}
       <ul class="files" data-testid="recent-files">
         {#each rows as row (row.key)}
-          {@const thumb = thumbnailUrl(row.entry)}
+          {@const thumb = thumbnailUrl(row.entry ?? { origin: row.origin, path: row.path })}
           <li class:selected={row.selected}>
-            <span class="thumb" aria-hidden="true">
-              {#if thumb}<img src={thumb} alt="" />{:else}<Box size={26} strokeWidth={1.6} />{/if}
+            <span class="pic" aria-hidden="true">
+              <Thumb src={thumb} icon={Box} iconSize={26} />
             </span>
             <span class="text">
               <span class="name">
@@ -165,21 +166,11 @@
     border-color: var(--accent);
     background: var(--accent-soft);
   }
-  .thumb {
-    display: grid;
-    place-items: center;
+  .pic {
     flex: none;
     width: 56px;
     height: 56px;
     border-radius: var(--r-sm);
-    background: var(--surface-3);
-    color: var(--text-faint);
-    overflow: hidden;
-  }
-  .thumb img {
-    width: 100%;
-    height: 100%;
-    object-fit: contain;
   }
   .text {
     display: flex;
