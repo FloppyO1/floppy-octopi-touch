@@ -6,6 +6,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-25
+
+### Added
+- Temperature screen: hotend and bed ring gauges (tap or Set = NumPad with presets, confirmation above the
+  thresholds), Off per heater and All heaters off (confirmed while a job runs), live uPlot chart of actual and
+  target temperatures with a 5/15/30 min window (remembered), preheat presets.
+- Preset manager: add and edit (name through the on-screen keyboard, hotend, bed, optional fan), reorder, delete
+  (confirmed), restore the defaults (confirmed); names must be unique and temperatures within the limits.
+- Move screen: X/Y/Z jog pad with 0.1/1/10/50 mm steps (remembered), home XY/Z/all, motors off (M84), head
+  position from M114 (`PositionUpdate` events), part fan, jog speeds for X/Y and Z. Axis inversion and the build
+  volume come from the OctoPrint printer profile: once the position is known, jogs are shortened to stay inside
+  the volume and refused at the edge. Locked while a job runs.
+- Filament screen: guided wizard (material from the presets → heat up and wait → insert → load → purge until
+  clean → done, or unload) using M701/M702 when the capability is enabled, otherwise G-code built from the
+  extruder settings (bowden length fast, slow load, unload plus bowden, purge; moves split below Marlin's
+  200 mm limit); M600 change when advanced pause is enabled, also offered during a print. The end of each step is
+  detected with `M400` + `M114`. Manual extrude/retract with length and speed, disabled below the minimum
+  extrusion temperature (cold extrusion protection). Extruder setup dialog; until it is saved the wizard warns
+  that prudent defaults are used. Locked while a job runs.
+- Settings schema v5: `temperature.chartMinutes`, `move.step`, `move.xyFeedrate`, `move.zFeedrate`,
+  `filament.minTemp`.
+- `Segmented` control in the design system.
+- Development: the smoke test covers the three screens (NumPad targets, preset CRUD, jog limits, extruder setup,
+  load/unload wizard, manual extrusion) and checks that Move and Filament are locked while printing.
+
 ## [0.5.0] - 2026-09-25
 
 ### Added

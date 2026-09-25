@@ -75,12 +75,12 @@ icons are bundled.
 | Folder | Content |
 |---|---|
 | `src/lib/api/` | transport: `http.ts` (JSON helpers, path encoding), `octoprint.ts` (typed REST client), `agent.ts` (`/local/*`), `socket.ts` (push API), `types.ts` (OctoPrint 1.11 types) |
-| `src/lib/core/` | pure, unit-tested logic: M115 capabilities, host action parser, temperature ring buffer, file tree helpers (recent files, thumbnails, sort, search, breadcrumbs), printer phase/tone and plugin detection, settings schema/migrations, formatting, gauge geometry, NumPad entry, keyboard layouts, overrides from the log (`tune`), DisplayLayerProgress layers (`layer`), webcam source (`webcam`), idle levels (`idle`), print notices (`notices`) |
+| `src/lib/core/` | pure, unit-tested logic: M115 capabilities, host action parser, temperature ring buffer, file tree helpers (recent files, thumbnails, sort, search, breadcrumbs), printer phase/tone and plugin detection, settings schema/migrations, formatting, gauge geometry, NumPad entry, keyboard layouts, overrides from the log (`tune`), DisplayLayerProgress layers (`layer`), webcam source (`webcam`), idle levels (`idle`), print notices (`notices`), presets list operations (`presets`), jog limits (`move`), filament sequences (`filament`), chart colours (`chart`) |
 | `src/lib/stores/` | Svelte 5 stores (classes with `$state`/`$derived`, one singleton each) and `dataLayer.ts`, which wires the socket to them |
 | `src/lib/i18n/` | `en.json`, `it.json`, `t()`, `setLocale()` (default English) |
 | `src/lib/ui/` | design system: tokens, components, `dialogs`/`toast` services, `pressable` attachment, theme (accent) and kiosk helpers |
 | `src/shell/` | app shell: sidebar, status bar, screen registry, connection and printer overlays, screensaver, print notice dialog |
-| `src/screens/` | screens (`Home` with its parts in `home/`, `Files` with its parts in `files/`, temporary `System`, `Placeholder`), shared `heaterTarget.ts`, dev-only pages in `dev/` (`Gallery`, `Debug`) |
+| `src/screens/` | screens (`Home` with its parts in `home/`, `Files` in `files/`, `Temperature` in `temperature/`, `Move` in `move/`, `Filament` in `filament/`, temporary `System`, `Placeholder`), shared `heaterTarget.ts`, dev-only pages in `dev/` (`Gallery`, `Debug`) |
 
 OctoPrint returns absolute `refs` URLs built from its own host (e.g. `http://octoprint:5000/...` in Docker):
 the client never uses them and always builds relative paths.
@@ -165,6 +165,33 @@ the client never uses them and always builds relative paths.
 - **Live updates**: `UpdatedFiles`, `FileAdded`, `FileRemoved`, `FolderAdded`, `FolderRemoved`, `FileDeselected`
   and `MetadataAnalysisFinished` reload the file list (debounced).
 
+### Temperature, Move and Filament
+
+- **Temperature** (`src/screens/Temperature.svelte`, parts in `temperature/`): `HeaterCard` per heater (gauge and
+  Set → `askHeaterTarget()`, Off → `heaterOff()`), All heaters off (`allHeatersOff()`; both confirm while a job
+  runs), `TempChart` and the presets row (preheat disabled during a job). `TempChart` builds one uPlot instance
+  per heater set (actual + dashed target series, colours from the state tokens via `core/chart.ts`) and calls
+  `setData()` on every `temperatures.revision`; the x range is always `[last - window, last]`, the y range starts
+  at 0. The window (`temperature.chartMinutes`) is a setting. `PresetManager`/`PresetEditor` use the pure helpers
+  of `core/presets.ts` (move, upsert, remove, validate: unique name ≤ 24 chars, temperatures within the NumPad
+  maxima) and `defaultPresets()` to restore.
+- **Move** (`src/screens/Move.svelte`, `move/actions.ts`): the step and the X/Y and Z feed rates are settings
+  (`move.*`). `planJog()` (`core/move.ts`) turns the on-screen direction into a machine move (profile
+  `axes.<axis>.inverted`) and, when the position is known, clamps it to the profile volume (`axisBounds()`:
+  0…size, or centred for `origin: center`); a zero move shows a toast. `printer.jog()` updates the position
+  optimistically before the request (so quick taps are limited correctly) and schedules one `M400` + `M114`
+  600 ms after the last jog; `reportPosition()` drops M114 answers older than the last jog. Homing asks for the
+  position after `G28`, `M84` makes it unknown. Everything but the fan is disabled while `printer.busy`.
+- **Filament** (`src/screens/Filament.svelte`, parts in `filament/`): `flow.svelte.ts` is the wizard state machine
+  (`material → heat → [insert] → run → [purge] → done`), a singleton so a running step survives navigation. The
+  heat step sets the preset's hotend target and advances once `reachedTarget()`; each run sends
+  `actionGcode()` (`core/filament.ts`: `M701`/`M702` with the `filamentLoadUnload` capability, `M600` for a
+  change, otherwise `M83`, `G1 E… F…` pieces of ≤ 100 mm, `M82`) followed by `M400` + `M114`, and waits for the
+  next `PositionUpdate` (timeout: nominal duration + 30 s, 5 min for firmware commands, none for M600). The
+  progress bar is a CSS animation over the nominal duration. `canExtrude()` blocks extrusion below
+  `filament.minTemp`. `FilamentSetup` edits `filament.*` and sets `configured`; until then the wizard warns once
+  per session. During a job the screen is locked and, with the `advancedPause` capability, offers `M600`.
+
 ### Live updates (push API)
 
 1. open `ws://<agent>/sockjs/websocket` (the agent relays it to OctoPrint with the API key);
@@ -188,7 +215,8 @@ After that REST is only used on events that announce a change:
 |---|---|
 | `UpdatedFiles`, `FileAdded`, `FileRemoved`, `FolderAdded`, `FolderRemoved`, `FileDeselected`, `MetadataAnalysisFinished` | file list reload (debounced 500 ms) |
 | `Connected` | reload connection and printer profile, reset the overrides; OctoPrint sends M115 itself |
-| `Disconnected` | reset firmware capabilities, host prompts and overrides |
+| `Disconnected` | reset firmware capabilities, host prompts, overrides and head position |
+| `PositionUpdate` | head position (M114 answer), ignored when a jog was sent after the last request |
 | `PrintDone`, `PrintFailed`, `PrintPaused`, `PrintResumed`, `PrintCancelled`, `PrintStarted` | print notices |
 | `SettingsUpdated` / `PrinterProfileModified` | reload settings / profile |
 | `FirmwareData` | firmware name |
@@ -196,7 +224,7 @@ After that REST is only used on events that announce a change:
 | Store | Source | Notes |
 |---|---|---|
 | `connection` | `/local/health`, socket status, `connected`, `/api/connection` | connect/disconnect |
-| `printer`, `job` | `current.state`, `job`, `progress`, `currentZ` | `phase` derived from the flags, `busy` while a job exists, ETA |
+| `printer`, `job` | `current.state`, `job`, `progress`, `currentZ`, `PositionUpdate` | `phase` derived from the flags, `busy` while a job exists, ETA; head `position`, jog (optimistic), home, motors off |
 | `temperatures` | `history.temps` / `current.temps` | `TemperatureHistory` (typed arrays, 2048 samples ≈ 30 min+); `revision` bumps on new samples |
 | `terminal` | `history.logs` / `current.logs` | last 1000 lines |
 | `capabilities` | `Cap:` lines of the M115 answer in the log + settings overrides | sends M115 once if the report is unknown |

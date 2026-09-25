@@ -60,19 +60,23 @@ frontend/src/lib/api/          http.ts, octoprint.ts (typed REST), agent.ts (/lo
 frontend/src/lib/core/         pure logic + tests: capabilities (M115), hostActions, tempHistory, files,
                                printerState (phase, tone, plugins), settings (schema/defaults/migrations, accent),
                                format, gauge (ring geometry, heater tone), numpad, keyboard (layouts, editing),
-                               tune (fan/M220/M221 from the log), layer (DLP), webcam, idle, notices
+                               tune (fan/M220/M221 from the log), layer (DLP), webcam, idle, notices, presets,
+                               move (jog direction + volume limits), filament (load/unload/purge G-code), chart
 frontend/src/lib/stores/       *.svelte.ts singletons (connection, printer/job, temperatures, files, usb, terminal,
                                events, capabilities, prompt, server, settings, nav, clock, tune, notices, idle)
                                + dataLayer.ts (socket wiring)
 frontend/src/lib/i18n/         en.json, it.json, index.svelte.ts (t(), setLocale())
 frontend/src/lib/ui/           design system: tokens.css, components (Button, Card, Modal, NumPad, OnScreenKeyboard, Thumb,
-                               RingGauge, SliderDialog, WebcamView, …), dialogs.svelte.ts / toast.svelte.ts services,
+                               RingGauge, SliderDialog, Segmented, WebcamView, …), dialogs.svelte.ts / toast.svelte.ts services,
                                press.ts, theme.ts, kiosk.ts
 frontend/src/shell/            Shell, Sidebar, StatusBar, ConnectionOverlay, PrinterOverlay, Screensaver, NoticeDialog,
                                screens.ts (registry)
 frontend/src/screens/          Home + home/ (JobView, IdleView, Preview, StatusRows, actions.ts), Files + files/
                                (view state, items, FileGrid, FileDetail, UsbDetail, ImportProgress, actions.ts),
-                               heaterTarget.ts, System (temporary), Placeholder; dev/Gallery + dev/Debug (dev only)
+                               Temperature + temperature/ (HeaterCard, TempChart = uPlot, PresetManager/Editor),
+                               Move + move/actions.ts, Filament + filament/ (flow.svelte.ts wizard state, Wizard,
+                               ManualPanel, FilamentSetup), heaterTarget.ts, System (temporary), Placeholder;
+                               dev/Gallery + dev/Debug (dev only)
 frontend/preview.html          1024×600 frame around the app (also in the production build)
 dev/docker-compose.yml         dev stack + tool services; dev/docker/*.Dockerfile
 dev/octoprint/                 seed config.yaml + init.sh for the OctoPrint volume
@@ -134,11 +138,21 @@ deploy/, scripts/              placeholders (session 9)
 - The agent reads thumbnails straight from OctoPrint's uploads (`FOT_UPLOADS_DIR`, volume mounted `:ro`); the
   disk cache is keyed by path + size + mtime, so a re-uploaded file gets a fresh thumbnail.
 
+- Virtual Printer and moves: it applies `G90`/`G91` at once but buffers `G0`/`G1`, so a jog sent while earlier moves
+  are still queued can run as an absolute move there; it also answers `M114` immediately (hence `M400` before
+  every `M114` in the app). Real Marlin is sequential. In Playwright, leave ~1.3 s between 50 mm jogs.
+- OctoPrint fires `PositionUpdate` (x, y, z, e, t, f, reason) for every M114 answer: the filament wizard uses
+  `M400` + `M114` to know when its moves are done.
+- A Card's `{#snippet actions()}` shadows a script variable called `actions` inside the Card: name it otherwise.
+- `Wizard.svelte` and a `wizard.svelte.ts` in the same folder clash (case-insensitive file names): that is why
+  the wizard state lives in `filament/flow.svelte.ts`.
+
 ## Current state
 
-v0.5.0 (session 5): Files screen (local storage with folders/sort/grid-list/search, detail with print/select/
-delete, SD card tab, USB stick tab with import progress and eject), agent thumbnail extraction (PNG/JPG/QOI,
-disk cache) used everywhere via `thumbnailUrl()`, USB endpoints + SSE `/local/events`, optional screensaver
-thumbnail, settings schema v4. Home, screensaver, notices from session 4; design system and shell from session 3
-(accent teal). Next: session 6 (Temperatures, Movement, Filament).
+v0.6.0 (session 6): Temperature screen (heater cards, all off, uPlot chart 5/15/30 min, preset CRUD with reorder
+and restore), Move screen (jog 0.1/1/10/50 mm clamped to the printer profile volume once M114 is known, homing,
+motors off, jog speeds), Filament screen (wizard load/unload/M600 with M701/M702 or G-code sequences, extruder
+setup, manual extrude/retract with cold extrusion guard); Move/Filament locked while printing; settings schema v5.
+Files (session 5), Home/screensaver/notices (session 4), design system and shell (session 3, accent teal).
+Next: session 7 (Terminal, Macros, Leveling/Mesh).
 See `docs/PLAN.md` for details and notes between sessions.

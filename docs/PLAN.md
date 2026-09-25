@@ -451,7 +451,7 @@ _Legenda: `[ ]` da fare · `[~]` in corso (interrotta se la trovi a inizio sessi
 - [x] Sessione 3 — Design system e shell (2026-09-25, v0.3.0)
 - [x] Sessione 4 — Home, controllo stampa, screensaver, notifiche (2026-09-25, v0.4.0)
 - [x] Sessione 5 — File (2026-09-25, v0.5.0)
-- [ ] Sessione 6 — Temperature, Movimento, Filamento
+- [x] Sessione 6 — Temperature, Movimento, Filamento (2026-09-25, v0.6.0)
 - [ ] Sessione 7 — Terminale, Macro, Livellamento/Mesh
 - [ ] Sessione 8 — Sistema e Impostazioni
 - [ ] Sessione 9 — Installazione sul Raspberry
@@ -716,3 +716,60 @@ _(ogni sessione aggiunge qui decisioni prese, deviazioni dal piano, problemi ape
   `curl -X DELETE http://127.0.0.1:8765/api/files/local/<file>` poi
   `curl -F file=@dev/sample-gcode/<file> http://127.0.0.1:8765/api/files/local`;
   `curl "http://127.0.0.1:8765/local/thumbnail?path=<file>" -o x.png` per provare l'estrazione.
+
+**Sessione 6 — Temperature, Movimento, Filamento (2026-09-25, v0.6.0)**
+- Fatto (Temperature): card per hotend e piatto (anello, Imposta → NumPad con preset e conferma sopra soglia,
+  Spegni), "Spegni tutti i riscaldatori" (con conferma se c'è un lavoro), grafico **uPlot** attuale + target
+  tratteggiato con finestra 5/15/30 min persistente, riga dei preset (preriscaldo disabilitato in stampa).
+  Gestione preset in un modal: aggiungi/modifica (nome con tastiera a schermo, hotend, piatto, ventola opzionale),
+  sposta su/giù, elimina (conferma), ripristina predefiniti (conferma); nome unico ≤ 24 caratteri, temperature
+  entro i massimi.
+- Fatto (Movimento): pad X/Y/Z 104 px con passo 0.1/1/10/50 persistente, home XY/Z/tutti, spegni motori (M84,
+  posizione diventa sconosciuta), posizione da M114 (evento `PositionUpdate`), ventola, velocità jog X/Y e Z
+  (impostazioni). Inversione assi e volume dal profilo OctoPrint: con posizione nota lo spostamento viene
+  accorciato per restare nel volume e rifiutato al bordo (toast). Bloccato durante un lavoro.
+- Fatto (Filamento): wizard materiale → riscaldo con attesa → inserimento → carico → spurgo ("spurga ancora" /
+  "è pulito") → fatto, oppure scarico; M701/M702 se la capability è attiva, altrimenti sequenze G-code dalle
+  impostazioni (bowden veloce, carico lento, scarico + bowden, spurgo; mosse ≤ 100 mm per il limite
+  EXTRUDE_MAXLENGTH di Marlin); "Cambio (M600)" con la capability advanced pause, offerto anche durante la stampa.
+  Pannello manuale estrudi/ritrai (lunghezza 5/10/50/100, velocità 60/150/300 mm/min) disabilitato sotto la
+  temperatura minima (170 °C, impostabile). Dialog "Configura estrusore" (tipo, bowden, lunghezze, velocità,
+  temperatura minima): finché non viene salvato il wizard mostra l'avviso e al primo avvio chiede se configurare
+  o usare i predefiniti prudenti (una volta per sessione). Bloccato durante un lavoro.
+- Impostazioni **v5**: `temperature.chartMinutes`, `move.step/xyFeedrate/zFeedrate` (10 mm, 3000, 300 mm/min),
+  `filament.minTemp` (170). Nuovo componente `Segmented`. 108 vitest (15 nuovi: preset, jog, filamento, v5);
+  bundle JS 109 KB gzip (uPlot ≈ 22 KB), CSS 9,5 KB. Smoke test esteso (NumPad, CRUD preset, limiti jog,
+  configurazione estrusore, wizard carico/scarico, estrusione manuale, blocchi in stampa), verde su Vite e sulla
+  build dell'agent. Screenshot controllati anche in italiano; `docs/images/temperature-v0.6.0.png`.
+- Decisioni:
+  - **Fine delle mosse**: dopo ogni sequenza del wizard `M400` + `M114`; l'evento `PositionUpdate` di OctoPrint
+    (verificato nel sorgente 1.11: `on_comm_position_update`) segna la fine. Timeout: durata nominale + 30 s,
+    5 min per M701/M702, nessuno per M600 (pulsante "Cambio terminato"). La barra di avanzamento è
+    un'animazione CSS sulla durata nominale.
+  - Estrusione con G-code propri (`M83`, `G1 E… F…`, `M82`) invece di `POST /api/printer/tool extrude`: OctoPrint
+    limita la velocità a quella E del profilo (300 mm/min nel profilo di default), troppo bassa per il bowden.
+  - Filamento e Movimento bloccati anche in **pausa**: `M83/M82` e i jog cambierebbero lo stato del file in
+    stampa (es. estrusione relativa di PrusaSlicer). Per il cambio a metà stampa c'è M600 (firmware + prompt).
+  - Posizione: aggiornamento **ottimistico** prima dell'invio del jog, una richiesta `M400` + `M114` 600 ms dopo
+    l'ultimo jog, risposte più vecchie dell'ultimo jog scartate (`reportPosition()`).
+  - Riscaldatori: le temperature si possono cambiare anche in stampa (come dalla Home), ma spegnere chiede conferma.
+  - Colori del grafico dai token di stato (hotend = heating, piatto = cooling), non dall'accento.
+- Deviazioni / scoperte:
+  - **Virtual Printer**: applica subito `G90`/`G91` ma mette in coda i movimenti, quindi un jog inviato mentre il
+    precedente è in corso può diventare assoluto; risponde anche a `M114` prima della fine delle mosse (da qui
+    `M400`). Marlin reale è sequenziale. Nello smoke test i jog da 50 mm sono distanziati di 1,3 s (gotcha in
+    CLAUDE.md). La Virtual Printer esegue le mosse E quasi istantaneamente.
+  - Collisioni di nomi: `Wizard.svelte` vs `wizard.svelte.ts` (file system case-insensitive) → `flow.svelte.ts`;
+    uno snippet `actions` di Card nasconde una variabile `actions` dello script.
+  - Errore di processo: due comandi Bash inutili (un heredoc `python3` vuoto e un `node -e "1"`) lanciati per
+    sbaglio sull'host; non hanno eseguito nulla ma non vanno rifatti.
+- Problemi aperti / note per le prossime sessioni:
+  - S8: UI definitiva per `filament.*` (oggi nel dialog "Configura estrusore" della schermata Filamento, riusabile),
+    soglie/massimi temperature e velocità jog (oggi nei campi della schermata Movimento).
+  - S7 (livellamento): riusare `printer.position`, `planJog()` e `printer.requestPosition()`; per Z sotto 0
+    (offset) `planJog` oggi limita Z a ≥ 0 quando la posizione è nota.
+  - S10: verificare sul Marlin reale M114 durante i jog, EXTRUDE_MAXLENGTH, velocità di carico/scarico con
+    l'estrusore vero e se il firmware ha M701/M702/M600 abilitati.
+  - Il bundle è cresciuto a 109 KB gzip: se servisse, uPlot può essere caricato a richiesta (import dinamico).
+- Comandi utili: `window.__fot.printer.position` / `window.__fot.printer.requestPosition()` in console;
+  la finestra del grafico si prova con `http://localhost:5173/#/temperature`.
