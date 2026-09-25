@@ -10,10 +10,13 @@ import Thermometer from '@lucide/svelte/icons/thermometer';
 import type { Component } from 'svelte';
 import type { ScreenId } from '../lib/stores/nav.svelte';
 import type { IconComponent } from '../lib/ui/types';
+import Filament from '../screens/Filament.svelte';
 import Files from '../screens/Files.svelte';
 import Home from '../screens/Home.svelte';
+import MoveScreen from '../screens/Move.svelte';
 import Placeholder from '../screens/Placeholder.svelte';
 import System from '../screens/System.svelte';
+import Temperature from '../screens/Temperature.svelte';
 
 export interface ScreenDef {
   id: ScreenId;
@@ -26,9 +29,9 @@ export interface ScreenDef {
 export const SCREENS: readonly ScreenDef[] = [
   { id: 'home', icon: House, component: Home, needsPrinter: true },
   { id: 'files', icon: FolderOpen, component: Files, needsPrinter: false },
-  { id: 'temperature', icon: Thermometer, component: Placeholder, needsPrinter: true },
-  { id: 'move', icon: Move, component: Placeholder, needsPrinter: true },
-  { id: 'filament', icon: Spool, component: Placeholder, needsPrinter: true },
+  { id: 'temperature', icon: Thermometer, component: Temperature, needsPrinter: true },
+  { id: 'move', icon: Move, component: MoveScreen, needsPrinter: true },
+  { id: 'filament', icon: Spool, component: Filament, needsPrinter: true },
   { id: 'terminal', icon: SquareTerminal, component: Placeholder, needsPrinter: false },
   { id: 'leveling', icon: Grid3x3, component: Placeholder, needsPrinter: true },
   { id: 'system', icon: Settings, component: System, needsPrinter: false },

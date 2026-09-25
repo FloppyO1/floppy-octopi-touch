@@ -4,7 +4,7 @@
  */
 import type { TemperaturePreset } from '../lib/core/settings';
 import { t } from '../lib/i18n/index.svelte';
-import { settings, temperatures, tune } from '../lib/stores';
+import { printer, settings, temperatures, tune } from '../lib/stores';
 import { dialogs } from '../lib/ui/dialogs.svelte';
 import { toast } from '../lib/ui/toast.svelte';
 
@@ -33,7 +33,7 @@ export async function askHeaterTarget(heater: string): Promise<void> {
 }
 
 /** Asks for confirmation if `value` is above the configured threshold of `heater`. */
-async function confirmHigh(heater: string, value: number): Promise<boolean> {
+export async function confirmHigh(heater: string, value: number): Promise<boolean> {
   const limits = settings.value.temperature.confirmAbove;
   const confirmAbove = heater === 'bed' ? limits.bed : limits.hotend;
   if (value <= confirmAbove) return true;
@@ -67,4 +67,29 @@ export async function cooldown(): Promise<void> {
   } catch {
     toast.show(t('temps.setFailed'), { tone: 'error' });
   }
+}
+
+/** Turns one heater off; during a job this ruins the print, so it asks first. */
+export async function heaterOff(heater: string): Promise<void> {
+  if (printer.busy && !(await confirmOffWhilePrinting(t(`heater.${heater}`)))) return;
+  try {
+    await temperatures.setTarget(heater, 0);
+  } catch {
+    toast.show(t('temps.setFailed'), { tone: 'error' });
+  }
+}
+
+/** "All off" of the Temperature screen: like `cooldown()`, with the same guard as `heaterOff()`. */
+export async function allHeatersOff(): Promise<void> {
+  if (printer.busy && !(await confirmOffWhilePrinting(t('temps.allHeaters')))) return;
+  await cooldown();
+}
+
+function confirmOffWhilePrinting(what: string): Promise<boolean> {
+  return dialogs.confirm({
+    title: t('temps.offPrintingTitle'),
+    message: t('temps.offPrintingMessage', { heater: what }),
+    confirmLabel: t('temps.turnOff'),
+    tone: 'danger',
+  });
 }

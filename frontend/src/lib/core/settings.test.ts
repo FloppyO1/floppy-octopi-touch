@@ -20,6 +20,7 @@ describe('migrateSettings', () => {
     expect(settings.temperature).toEqual({
       confirmAbove: { hotend: 250, bed: 90 },
       max: { hotend: 275, bed: 110 },
+      chartMinutes: 15,
     });
     expect(settings.screenOff).toEqual({ enabled: false, timeoutMin: 30 });
     expect(settings.filament.bowdenLength).toBe(0);
@@ -61,26 +62,43 @@ describe('migrateSettings', () => {
     expect(settings.capabilities.overrides.autolevel).toBe('on');
   });
 
-  it('migrates v2 documents up to v4 with the webcam, Home preview and file browser defaults', () => {
+  it('migrates v2 documents up to the current version with the webcam, Home preview and file browser defaults', () => {
     const { settings, changed } = migrateSettings({ schemaVersion: 2, language: 'it', home: { preview: 'map' } });
     expect(changed).toBe(true);
-    expect(settings.schemaVersion).toBe(4);
+    expect(settings.schemaVersion).toBe(SETTINGS_VERSION);
     expect(settings.language).toBe('it');
     expect(settings.webcam).toEqual({ url: '' });
     expect(settings.home).toEqual({ preview: 'thumbnail' });
     expect(settings.files).toEqual({ sort: 'date', direction: 'desc', view: 'grid' });
   });
 
-  it('migrates v3 documents to v4: screensaver thumbnail off, file browser prefs validated', () => {
+  it('migrates v3 documents: screensaver thumbnail off, file browser prefs validated', () => {
     const { settings, changed } = migrateSettings({
       schemaVersion: 3,
       screensaver: { enabled: false, timeoutMin: 2 },
       files: { sort: 'colour', direction: 'up', view: 'list' },
     });
     expect(changed).toBe(true);
-    expect(settings.schemaVersion).toBe(4);
+    expect(settings.schemaVersion).toBe(SETTINGS_VERSION);
     expect(settings.screensaver).toEqual({ enabled: false, timeoutMin: 2, showThumbnail: false });
     expect(settings.files).toEqual({ sort: 'date', direction: 'desc', view: 'list' });
+  });
+
+  it('migrates v4 documents to v5: chart window, jog settings and cold extrusion limit', () => {
+    const { settings, changed } = migrateSettings({
+      schemaVersion: 4,
+      temperature: { confirmAbove: { hotend: 240, bed: 85 }, chartMinutes: 7 },
+      move: { step: 3, xyFeedrate: 4000 },
+      filament: { extruderType: 'hybrid', bowdenLength: 420 },
+    });
+    expect(changed).toBe(true);
+    expect(settings.schemaVersion).toBe(5);
+    expect(settings.temperature.confirmAbove).toEqual({ hotend: 240, bed: 85 });
+    expect(settings.temperature.chartMinutes).toBe(15);
+    expect(settings.move).toEqual({ step: 10, xyFeedrate: 4000, zFeedrate: 300 });
+    expect(settings.filament.extruderType).toBe('unknown');
+    expect(settings.filament.bowdenLength).toBe(420);
+    expect(settings.filament.minTemp).toBe(170);
   });
 
   it('keeps documents from a newer release without downgrading them', () => {

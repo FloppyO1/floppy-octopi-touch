@@ -9,6 +9,7 @@ import type {
   EventPayload,
   PluginPayload,
 } from '../api/types';
+import { positionFromEvent } from '../core/move';
 import { capabilities } from './capabilities.svelte';
 import { connection } from './connection.svelte';
 import { events } from './events.svelte';
@@ -48,6 +49,7 @@ function handleEvent({ type, payload }: EventPayload): void {
       capabilities.reset();
       prompt.reset();
       tune.reset();
+      printer.setPosition(null);
       void connection.refresh();
       break;
     case 'FirmwareData':
@@ -58,6 +60,9 @@ function handleEvent({ type, payload }: EventPayload): void {
       break;
     case 'PrinterProfileModified':
       void server.loadProfile();
+      break;
+    case 'PositionUpdate':
+      printer.reportPosition(positionFromEvent(payload));
       break;
   }
   notices.handleEvent(type, payload);

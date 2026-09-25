@@ -402,6 +402,18 @@ async function printFlow(page) {
   await page.getByTestId('job-pause').waitFor({ timeout: 15_000 });
   log('pause/resume', 'confirmed pause, no notice, resumed');
 
+  // Manual control is locked while the job runs.
+  await page.getByTestId('nav-move').click();
+  await page.getByTestId('move-locked').waitFor();
+  if (!(await page.getByTestId('jog-xplus').isDisabled())) throw new Error('jog enabled while printing');
+  await page.getByTestId('nav-filament').click();
+  await page.getByTestId('filament-locked').waitFor();
+  if (!(await page.getByTestId('manual-extrude').isDisabled())) throw new Error('extrude enabled while printing');
+  await page.screenshot({ path: `${OUT}/filament-locked.png` });
+  await page.getByTestId('nav-home').click();
+  await page.getByTestId('job-pause').waitFor();
+  log('locks', 'Move and Filament locked while printing');
+
   // The choice is persisted: switch only if the thumbnail is shown.
   if ((await page.getAttribute('[data-testid=preview]', 'data-mode')) !== 'webcam') {
     await page.getByTestId('preview-toggle').click();
@@ -487,6 +499,164 @@ async function screensaver(page) {
   log('screen off', 'display off through the agent, back on at the first tap');
 }
 
+// Types digits on the open NumPad and confirms; waits for its outro so the next one is unambiguous.
+async function numpadEnter(page, digits) {
+  await page.waitForSelector('[data-testid=numpad]');
+  for (const d of digits) await page.getByTestId('numpad').getByRole('button', { name: d, exact: true }).click();
+  await page.getByTestId('numpad-ok').click();
+  await page.waitForSelector('[data-testid=numpad]', { state: 'detached' });
+}
+
+const waitDisabled = (page, id, disabled = true) =>
+  page.waitForFunction(([sel, d]) => document.querySelector(sel)?.disabled === d, [`[data-testid=${id}]`, disabled], {
+    timeout: 20_000,
+  });
+
+// Temperature: NumPad target, off, window, presets CRUD (add with the keyboard, reorder, delete, restore), preheat.
+async function temperatureScreen(page) {
+  await page.goto(`${BASE_URL}/#/temperature`);
+  await page.waitForSelector('[data-testid=connection-overlay]', { state: 'detached', timeout: 60_000 });
+  await page.waitForSelector('[data-testid=temp-chart] canvas', { timeout: 20_000 });
+  await page.getByTestId('chart-window-5').click();
+  await page.getByTestId('set-tool0').click();
+  await numpadEnter(page, '190');
+  await waitText(page, 'heater-tool0', (t) => t.includes('Target 190'));
+  await waitText(page, 'heater-tool0', (t) => t.includes('At temperature'), 60_000);
+  await page.waitForTimeout(1500);
+  await page.screenshot({ path: `${OUT}/temperature.png` });
+  await page.getByTestId('off-tool0').click();
+  await waitDisabled(page, 'off-tool0');
+  await page.getByTestId('chart-window-15').click();
+  log('temperature', 'target 190°C from the NumPad, reached, turned off');
+
+  await page.getByTestId('presets-manage').click();
+  await page.getByTestId('preset-add').click();
+  await page.getByTestId('preset-name').click();
+  await page.waitForSelector('[data-testid=text-input]');
+  await page.keyboard.type('ABS');
+  await page.keyboard.press('Enter');
+  await page.waitForSelector('[data-testid=text-input]', { state: 'detached' });
+  await page.getByTestId('preset-hotend').click();
+  await numpadEnter(page, '245');
+  await page.getByTestId('preset-bed').click();
+  await numpadEnter(page, '100');
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: `${OUT}/preset-editor.png` });
+  await page.getByTestId('preset-save').click();
+  await page.waitForSelector('[data-testid=preset-editor]', { state: 'detached' });
+  const rows = () =>
+    page.$$eval('[data-testid^=preset-row-]', (els) => els.map((el) => el.querySelector('.name').textContent));
+  const absId = await page.$eval('[data-testid^=preset-row-]:last-child', (el) => el.dataset.testid.slice('preset-row-'.length));
+  await page.getByTestId(`preset-up-${absId}`).click();
+  if ((await rows()).join() !== 'PLA,PETG,ABS,TPU') throw new Error(`preset order: ${await rows()}`);
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: `${OUT}/presets.png` });
+  await page.getByTestId(`preset-delete-${absId}`).click();
+  await page.getByTestId('confirm-dialog').getByRole('button', { name: 'Delete', exact: true }).click();
+  await page.waitForSelector('[data-testid=confirm-dialog]', { state: 'detached' });
+  await page.getByTestId('preset-down-pla').click();
+  await page.getByTestId('preset-restore').click();
+  await page.getByTestId('confirm-dialog').getByRole('button', { name: 'Restore defaults', exact: true }).click();
+  await page.waitForSelector('[data-testid=confirm-dialog]', { state: 'detached' });
+  if ((await rows()).join() !== 'PLA,PETG,TPU') throw new Error(`restored presets: ${await rows()}`);
+  await closeModal(page, 'preset-manager');
+  log('presets', 'ABS added with keyboard + NumPad, moved, deleted; defaults restored');
+
+  await page.getByTestId('temp-preset-pla').click();
+  await waitDisabled(page, 'off-bed', false);
+  await page.getByTestId('all-off').click();
+  await waitDisabled(page, 'off-tool0');
+  await waitDisabled(page, 'off-bed');
+  log('preheat', 'PLA preset from the screen, then all heaters off');
+}
+
+// Move: home, jog with steps, soft limits from the profile (clamped moves, edge toast), motors off.
+async function moveScreen(page) {
+  await page.goto(`${BASE_URL}/#/move`);
+  await page.waitForSelector('[data-testid=jog-xplus]');
+  await page.getByTestId('home-all').click();
+  await waitText(page, 'pos-x', (t) => t.trim() === '0.00');
+  await waitText(page, 'pos-z', (t) => t.trim() === '0.00');
+  await page.getByTestId('jog-step-10').click();
+  await page.getByTestId('jog-xplus').click();
+  await waitText(page, 'pos-x', (t) => t.trim() === '10.00');
+  if (DEV) await terminalHas(page, 'G0 X10 F3000');
+  await page.getByTestId('jog-zminus').click();
+  await page.getByText('Z is already at the edge of the build volume').waitFor();
+  await page.getByTestId('jog-step-50').click();
+  // One at a time: the Virtual Printer applies G91/G90 at once but buffers the moves, so quick jogs
+  // would run as absolute moves there (real firmware is sequential).
+  for (let i = 0; i < 5; i++) {
+    await page.getByTestId('jog-xplus').click();
+    await page.waitForTimeout(1300);
+  }
+  await page.waitForTimeout(2000); // the debounced M114 (after M400) must confirm it
+  if ((await text(page, 'pos-x')).trim() !== '220.00') throw new Error(`x not clamped: ${await text(page, 'pos-x')}`);
+  await page.getByTestId('jog-yplus').click();
+  await waitText(page, 'pos-y', (t) => t.trim() === '50.00');
+  await page.waitForTimeout(600);
+  await page.screenshot({ path: `${OUT}/move.png` });
+  await page.getByTestId('jog-step-10').click();
+  await page.getByTestId('motors-off').click();
+  await waitText(page, 'pos-x', (t) => t.trim() === '—');
+  log('move', 'homed, jogged, clamped at X 220 (profile), Z edge refused, motors off');
+}
+
+// Filament: extruder setup, manual extrusion, load wizard (heat → insert → load → purge) and unload.
+async function filamentScreen(page) {
+  await page.goto(`${BASE_URL}/#/filament`);
+  await page.waitForSelector('[data-testid=wizard][data-step=material]');
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: `${OUT}/filament.png` });
+  await page.getByTestId('filament-setup-open').click();
+  await page.getByTestId('extruder-type').click();
+  await page.getByRole('option', { name: 'Direct drive', exact: true }).click();
+  await page.getByText('Slow load length', { exact: true }).locator('..').getByRole('button').click();
+  await numpadEnter(page, '20');
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: `${OUT}/filament-setup.png` });
+  await page.getByTestId('extruder-save').click();
+  await page.waitForSelector('[data-testid=filament-setup]', { state: 'detached' });
+  await page.waitForSelector('[data-testid=filament-not-configured]', { state: 'detached' });
+
+  await page.getByTestId('material-pla').click();
+  await page.getByTestId('wizard-start').click();
+  await page.waitForSelector('[data-testid=wizard][data-step=insert]', { timeout: 60_000 });
+  await page.getByTestId('wizard-load').click();
+  await page.waitForSelector('[data-testid=wizard][data-step=run]');
+  await page.waitForTimeout(200);
+  await page.screenshot({ path: `${OUT}/filament-run.png` });
+  await page.waitForSelector('[data-testid=wizard][data-step=purge]', { timeout: 60_000 });
+  if (DEV) await terminalHas(page, 'G1 E20 F150');
+  await page.getByTestId('wizard-clean').click();
+  await page.getByTestId('wizard-finish').click();
+  log('load wizard', 'PLA heated, 20 mm loaded (M83/G1/M400/M114), purge → done');
+
+  await waitDisabled(page, 'manual-extrude', false);
+  await page.screenshot({ path: `${OUT}/filament-hot.png` });
+  await page.getByTestId('manual-extrude').click();
+  if (DEV) await terminalHas(page, 'G1 E10 F150');
+
+  await page.getByTestId('filament-action-unload').click();
+  await page.getByTestId('wizard-start').click();
+  await page.waitForSelector('[data-testid=wizard][data-step=done]', { timeout: 60_000 });
+  if (DEV) await terminalHas(page, 'G1 E-100 F1500');
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: `${OUT}/filament-done.png` });
+  await page.getByTestId('wizard-cool').click();
+  await page.waitForSelector('[data-testid=wizard][data-step=material]');
+  await page.getByTestId('filament-action-load').click();
+  log('unload wizard', 'retracted 100 mm, hotend cooled; manual extrude sent');
+
+  // Back to the prudent defaults, so the next run sees the first-use warning again.
+  await page.evaluate(async () => {
+    const doc = await (await fetch('/local/settings')).json();
+    doc.filament = { ...doc.filament, extruderType: 'unknown', configured: false, loadSlowLength: 100 };
+    await fetch('/local/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(doc) });
+  });
+  await page.reload(); // the settings store would otherwise write its copy back later
+}
+
 async function kiosk(page) {
   await page.goto(`${BASE_URL}/?kiosk=1#/home`);
   await page.waitForSelector('[data-testid=gauge-hotend]');
@@ -520,6 +690,9 @@ try {
   if (DEV) await debugPage(page);
   await shell(page);
   await filesScreen(page);
+  await temperatureScreen(page);
+  await moveScreen(page);
+  await filamentScreen(page);
   await printFlow(page);
   if (DEV) await screensaver(page);
   await kiosk(page);

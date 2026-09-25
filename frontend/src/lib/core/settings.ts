@@ -8,7 +8,7 @@
 import { defaultCapabilityOverrides, type CapabilityOverrides } from './capabilities';
 import { SORT_KEYS, type SortDirection, type SortKey } from './files';
 
-export const SETTINGS_VERSION = 4;
+export const SETTINGS_VERSION = 5;
 
 export type Language = 'en' | 'it';
 export const LANGUAGES: readonly Language[] = ['en', 'it'];
@@ -46,6 +46,14 @@ export type HomePreview = (typeof HOME_PREVIEWS)[number];
 export const FILE_VIEWS = ['grid', 'list'] as const;
 export type FileView = (typeof FILE_VIEWS)[number];
 
+/** Time window of the temperature chart, in minutes. */
+export const CHART_WINDOWS = [5, 15, 30] as const;
+export type ChartWindow = (typeof CHART_WINDOWS)[number];
+
+/** Jog distances of the Move screen, in mm. */
+export const JOG_STEPS = [0.1, 1, 10, 50] as const;
+export type JogStep = (typeof JOG_STEPS)[number];
+
 export interface Settings {
   schemaVersion: number;
   language: Language;
@@ -60,8 +68,11 @@ export interface Settings {
     confirmAbove: { hotend: number; bed: number };
     /** Highest target accepted by the NumPad (°C); lower printer profile limits win. */
     max: { hotend: number; bed: number };
+    chartMinutes: ChartWindow;
   };
   presets: TemperaturePreset[];
+  /** Jog distance (mm) and speeds (mm/min) of the Move screen. */
+  move: { step: JogStep; xyFeedrate: number; zFeedrate: number };
   macros: Macro[];
   printDone: { beep: boolean; beepGcode: string };
   /** Feed rates in mm/min, lengths in mm. */
@@ -75,12 +86,23 @@ export interface Settings {
     slowFeedrate: number;
     unloadLength: number;
     purgeLength: number;
+    /** No extrusion below this hotend temperature (Marlin's EXTRUDE_MINTEMP is 170 °C). */
+    minTemp: number;
   };
   capabilities: { overrides: CapabilityOverrides };
   /** Manual stream URL; empty = the webcam configured in OctoPrint. */
   webcam: { url: string };
   home: { preview: HomePreview };
   files: { sort: SortKey; direction: SortDirection; view: FileView };
+}
+
+/** Presets of a fresh install (also used by "restore defaults"). */
+export function defaultPresets(): TemperaturePreset[] {
+  return [
+    { id: 'pla', name: 'PLA', hotend: 200, bed: 60, fan: null },
+    { id: 'petg', name: 'PETG', hotend: 235, bed: 80, fan: null },
+    { id: 'tpu', name: 'TPU', hotend: 225, bed: 50, fan: null },
+  ];
 }
 
 export function defaultSettings(): Settings {
@@ -94,12 +116,10 @@ export function defaultSettings(): Settings {
     temperature: {
       confirmAbove: { hotend: 250, bed: 90 },
       max: { hotend: 275, bed: 110 },
+      chartMinutes: 15,
     },
-    presets: [
-      { id: 'pla', name: 'PLA', hotend: 200, bed: 60, fan: null },
-      { id: 'petg', name: 'PETG', hotend: 235, bed: 80, fan: null },
-      { id: 'tpu', name: 'TPU', hotend: 225, bed: 50, fan: null },
-    ],
+    presets: defaultPresets(),
+    move: { step: 10, xyFeedrate: 3000, zFeedrate: 300 },
     macros: [
       { id: 'home', name: 'Home all', icon: 'home', color: 'accent', gcode: 'G28', confirm: false },
       {
@@ -123,6 +143,7 @@ export function defaultSettings(): Settings {
       slowFeedrate: 150,
       unloadLength: 100,
       purgeLength: 20,
+      minTemp: 170,
     },
     capabilities: { overrides: defaultCapabilityOverrides() },
     webcam: { url: '' },
@@ -144,6 +165,8 @@ const MIGRATIONS: Record<number, (doc: Doc) => Doc> = {
   2: (doc) => doc,
   // v4 (session 5): `files` and `screensaver.showThumbnail` (default off) from the defaults.
   3: (doc) => doc,
+  // v5 (session 6): `temperature.chartMinutes`, `move` and `filament.minTemp` from the defaults.
+  4: (doc) => doc,
 };
 
 const isObject = (v: unknown): v is Doc => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -186,6 +209,11 @@ export function migrateSettings(raw: unknown): MigrationResult {
   if (!SORT_KEYS.includes(settings.files.sort)) settings.files.sort = 'date';
   if (!['asc', 'desc'].includes(settings.files.direction)) settings.files.direction = 'desc';
   if (!FILE_VIEWS.includes(settings.files.view)) settings.files.view = 'grid';
+  if (!CHART_WINDOWS.includes(settings.temperature.chartMinutes)) settings.temperature.chartMinutes = 15;
+  if (!JOG_STEPS.includes(settings.move.step)) settings.move.step = 10;
+  if (!['unknown', 'direct', 'bowden'].includes(settings.filament.extruderType)) {
+    settings.filament.extruderType = 'unknown';
+  }
   // Array items are user data: drop malformed ones instead of failing later in the UI.
   settings.presets = settings.presets.filter(
     (p) => isObject(p) && typeof p.id === 'string' && typeof p.name === 'string' &&
