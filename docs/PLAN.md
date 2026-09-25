@@ -68,9 +68,17 @@ Procedura:
 - **Tastiera a schermo**: fatta **dentro l'app**, con lo stesso stile (layout QWERTY IT/EN, tastierino numerico, layout G-code).
 - **Navigazione**: **sidebar sinistra con 8 icone** (~88 px di larghezza, pulsanti ~64 px) + **status bar in alto** (~48 px) → area contenuto ~936×552.
 - **Colore d'accento**: da decidere in Sessione 3 — Claude propone **2-3 varianti** (screenshot a 1024×600) e l'utente sceglie.
+- **Indicatori ad anello (gauge)**: i valori principali si mostrano come **anelli circolari** con il valore grande al
+  centro e un'etichetta sotto (riferimento: immagine fornita dall'utente il 2026-09-25, stile "OctoPrint status
+  screen"): hotend e piatto con **attuale al centro + "Target: N °C"** sotto e tacca del target sull'anello,
+  ventola %, **job %**, **layer %** (solo con DisplayLayerProgress), e sulla schermata Sistema **CPU % (+ temperatura
+  e frequenza), RAM %, disco %**. Accanto agli anelli, righe di stato con icona (profilo stampante, connessione,
+  stato stampante). Resi in **SVG** (niente librerie), con transizione fluida del valore, colori dai token del tema
+  scuro (accento; colori di stato per heating/errore/fuori soglia), leggibili a 50-80 cm; toccando l'anello di una
+  temperatura si apre NumPad/preset, quello della ventola lo slider.
 
 ### Schermate
-1. **Home**: progresso %, tempo trascorso/rimanente, ETA, layer (se disponibile), temperature hotend/piatto con tap per impostarle, pausa/riprendi/stop, anteprima thumbnail o webcam, velocità (feedrate %) / flusso (flow %) / ventola modificabili al volo.
+1. **Home**: progresso %, tempo trascorso/rimanente, ETA, layer (se disponibile), temperature hotend/piatto con tap per impostarle, pausa/riprendi/stop, anteprima thumbnail o webcam, velocità (feedrate %) / flusso (flow %) / ventola modificabili al volo. Temperature, ventola, job % e layer % come **indicatori ad anello** (vedi "Scelte funzionali").
 2. **File**: tre sorgenti, selezionabili con tab:
    - **Local** (storage `local` di OctoPrint): cartelle, navigazione, ordinamento (nome/data/dimensione), info (tempo stimato, filamento, dimensioni), thumbnail, avvia/seleziona/elimina.
    - **SD stampante** (storage `sdcard` di OctoPrint): elenco, avvia, elimina, init/refresh/release SD; visibile solo se la stampante ha la SD attiva. Niente thumbnail/analisi (non disponibili). Avviso che upload verso SD via seriale è lento (non previsto in v1).
@@ -80,7 +88,7 @@ Procedura:
 5. **Filamento**: **wizard guidato** (materiale → preriscaldo → carico/scarico → spurgo) **+ controllo manuale** estrusore (lunghezza/velocità). Usa M701/M702/M600 se abilitati, altrimenti sequenze G-code configurabili.
 6. **Terminale + Macro**: console G-code con tastiera integrata, filtri (nascondi temperature/`ok`), **macro CRUD** con pulsanti.
 7. **Livellamento / Mesh**: livellamento manuale ai 4 angoli + centro (paper test, utile ORA senza probe), Mesh Bed Leveling manuale (`G29` MBL) se abilitato nel firmware, `G29` automatico quando ci sarà un probe, visualizzazione mesh (heatmap), babystep (`M290`), Z-offset (`M851`), salva EEPROM (`M500`).
-8. **Sistema**: IP / stato WiFi, riavvio/spegnimento Pi e riavvio OctoPrint (via system commands di OctoPrint), impostazioni app (lingua, timeout screensaver, capability firmware, azioni PSU/luci, API key), info versione.
+8. **Sistema**: anelli CPU % (temperatura, frequenza) / RAM % / disco %, IP / stato WiFi, riavvio/spegnimento Pi e riavvio OctoPrint (via system commands di OctoPrint), impostazioni app (lingua, timeout screensaver, capability firmware, azioni PSU/luci, API key), info versione.
 
 ### Extra
 - Notifica **fine stampa** a schermo (popup grande) + beep opzionale (`M300`).
@@ -276,6 +284,9 @@ Leggi docs/PLAN.md e CLAUDE.md. Esegui la Sessione 3:
   Livellamento, Sistema) + status bar in alto ~48 px (stato stampante, temperature compatte, orologio 24h, WiFi/IP,
   indicatore connessione) → contenuto ~936×552.
 - Componente PromptDialog per gli host action di Marlin (usato in S4).
+- Componente RingGauge (SVG): valore grande al centro, etichetta/sottotitolo (es. "Target: 190°C"), tacca opzionale
+  del target, min/max, colore da token (accento o stato), stato "non disponibile", transizione fluida, tappabile
+  (target ≥ 56 px); dimensioni S/M/L. Nella gallery: esempi hotend/piatto/ventola/job/layer/CPU.
 - Componenti: Button (varianti, stato pressed), IconButton, Card, Toggle, Slider touch, Stepper +/-,
   Modal, ConfirmDialog, Toast, NumPad (per temperature/valori), OnScreenKeyboard (QWERTY IT/EN, simboli, layout G-code),
   InputField che apre automaticamente tastiera/numpad.
@@ -290,6 +301,8 @@ Leggi docs/PLAN.md e CLAUDE.md. Esegui la Sessione 4:
 - Home: progresso grande, tempo trascorso/rimanente/ETA, layer (solo se DisplayLayerProgress), nome file, thumbnail o webcam
   (toggle), temperature con tap → NumPad/preset, pausa/riprendi/stop con conferma, feedrate % (M220), flow % (M221),
   ventola (M106/M107) con slider.
+- Layout Home con RingGauge: anelli hotend e piatto (attuale + target), ventola %, job % e layer % (solo con
+  DisplayLayerProgress, altrimenti l'anello non compare), righe di stato con icona (profilo, connessione, stato).
 - Vista idle (nessun job): stato stampante, ultimo file, scorciatoie (preriscalda preset, home, file recenti).
 - Webcam: URL dai settings OctoPrint (verifica API webcam di 1.11), proxy /webcam nell'agent, fallback se assente.
 - Screensaver "vista grande": dopo timeout configurabile, progresso gigante in stampa o orologio + temperature da fermo;
@@ -351,8 +364,10 @@ Leggi docs/PLAN.md e CLAUDE.md. Esegui la Sessione 7:
 ### Sessione 8 — Sistema e Impostazioni
 ```
 Leggi docs/PLAN.md e CLAUDE.md. Esegui la Sessione 8:
-- Agent: /local/system con IP, interfacce, SSID, qualità segnale (nmcli), hostname, uptime, temperatura CPU, versione app.
-- Schermata Sistema: info rete (nessuna gestione WiFi completa in v1, solo stato), system commands di OctoPrint
+- Agent: /local/system con IP, interfacce, SSID, qualità segnale (nmcli), hostname, uptime, temperatura CPU, versione app,
+  **uso CPU %, frequenza CPU, RAM %, disco %** (da /proc e statvfs, niente dipendenze extra).
+- Schermata Sistema: RingGauge CPU (con temperatura e frequenza), RAM e disco, aggiornati ogni pochi secondi solo
+  mentre la schermata è visibile; info rete (nessuna gestione WiFi completa in v1, solo stato), system commands di OctoPrint
   (riavvio OctoPrint, riavvio/spegnimento Pi) con conferma, riavvio kiosk.
 - Impostazioni: lingua, timeout screensaver, spegnimento schermo (on/off + minuti), beep fine stampa, soglie/massimi
   temperature, capability firmware (auto-rilevate + override), parametri filamento/estrusore, URL webcam manuale,
@@ -480,3 +495,8 @@ _(ogni sessione aggiunge qui decisioni prese, deviazioni dal piano, problemi ape
   - Il servizio `frontend` esegue `npm install` a ogni avvio (pochi secondi se già aggiornato).
   - Riconnessione socket testata solo a livello unitario (backoff): verificarla con riavvio di OctoPrint in S2.
 - Comandi utili: vedi `CLAUDE.md` (sezione Commands) e README.
+
+**Modifica al piano (2026-09-25, dopo la Sessione 1)**
+- Su richiesta dell'utente aggiunti gli **indicatori ad anello** (immagine di riferimento in stile "OctoPrint status
+  screen"): requisito in sezione 1, componente RingGauge in S3, layout Home con anelli in S4, anelli CPU/RAM/disco
+  e metriche agent in S8. Non era previsto prima. Adattarli al tema scuro e al colore d'accento scelto in S3.
