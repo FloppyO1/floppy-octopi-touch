@@ -1,0 +1,151 @@
+# FloppyOctoTouch development environment. Nothing is installed on the host: every tool runs here.
+#
+#   docker compose -f dev/docker-compose.yml up                    # OctoPrint + agent + Vite
+#   docker compose -f dev/docker-compose.yml run --rm agent-test   # pytest + ruff
+#   docker compose -f dev/docker-compose.yml run --rm frontend-test
+#   docker compose -f dev/docker-compose.yml run --rm playwright   # screenshots -> dev/screenshots
+#
+# Ports and credentials come from dev/.env (see dev/.env.example); all ports bind to 127.0.0.1.
+name: floppyoctotouch
+
+x-frontend-build: &frontend-build
+  context: ..
+  dockerfile: dev/docker/frontend.Dockerfile
+
+x-agent-build: &agent-build
+  context: ..
+  dockerfile: dev/docker/agent.Dockerfile
+
+services:
+  octoprint-init:
+    image: octoprint/octoprint:${OCTOPRINT_VERSION:-1.11.8}
+    entrypoint: ["sh", "/seed/init.sh"]
+    environment:
+      OCTOPRINT_DEV_USER: ${OCTOPRINT_DEV_USER:-admin}
+      OCTOPRINT_DEV_PASSWORD: ${OCTOPRINT_DEV_PASSWORD:-admin}
+      OCTOPRINT_API_KEY: ${OCTOPRINT_API_KEY:-floppyoctotouch-dev-api-key-not-secret}
+    volumes:
+      - octoprint-data:/octoprint
+      - ./octoprint:/seed:ro
+      - ./sample-gcode:/samples:ro
+
+  octoprint:
+    image: octoprint/octoprint:${OCTOPRINT_VERSION:-1.11.8}
+    depends_on:
+      octoprint-init:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:${OCTOPRINT_PORT:-5000}:5000"
+    volumes:
+      - octoprint-data:/octoprint
+    healthcheck:
+      # robots.txt is public and cheap: a 200 means the server is up.
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request as u; u.urlopen('http://127.0.0.1:5000/robots.txt', timeout=3)"
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+  agent:
+    build: *agent-build
+    image: floppyoctotouch-agent-dev
+    depends_on:
+      octoprint:
+        condition: service_healthy
+    environment:
+      FOT_OCTOPRINT_URL: http://octoprint:5000
+      FOT_API_KEY: ${OCTOPRINT_API_KEY:-floppyoctotouch-dev-api-key-not-secret}
+      FOT_HOST: 0.0.0.0
+      FOT_PORT: "8765"
+      FOT_DATA_DIR: /data
+      FOT_STATIC_DIR: /frontend/dist
+      FOT_USB_ROOTS: /media/usb0
+    ports:
+      - "127.0.0.1:${AGENT_PORT:-8765}:8765"
+    volumes:
+      - ../agent:/app
+      - ../frontend:/frontend:ro
+      - agent-data:/data
+      - ./fake-usb:/media/usb0:ro
+
+  frontend:
+    build: *frontend-build
+    image: floppyoctotouch-frontend-dev
+    depends_on:
+      - agent
+    environment:
+      AGENT_URL: http://agent:8765
+    ports:
+      - "127.0.0.1:${FRONTEND_PORT:-5173}:5173"
+    volumes:
+      - ../frontend:/app
+      - frontend-node-modules:/app/node_modules
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5173/').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+
+  # ---------------------------------------------------------------- tools (profile "tools")
+  agent-test:
+    profiles: [tools]
+    build: *agent-build
+    image: floppyoctotouch-agent-dev
+    volumes:
+      - ../agent:/app
+    command: sh -c "ruff check . && ruff format --check . && pytest -q"
+
+  frontend-test:
+    profiles: [tools]
+    build: *frontend-build
+    image: floppyoctotouch-frontend-dev
+    volumes:
+      - ../frontend:/app
+      - frontend-node-modules:/app/node_modules
+    command: sh -c "npm install --no-audit --prefer-offline && npm run check && npm test"
+
+  build:
+    profiles: [tools]
+    build: *frontend-build
+    image: floppyoctotouch-frontend-dev
+    volumes:
+      - ../frontend:/app
+      - frontend-node-modules:/app/node_modules
+    command: sh -c "npm install --no-audit --prefer-offline && npm run build"
+
+  playwright:
+    profiles: [tools]
+    image: mcr.microsoft.com/playwright:v1.63.0-noble
+    depends_on:
+      frontend:
+        condition: service_healthy
+    working_dir: /e2e
+    environment:
+      BASE_URL: http://frontend:5173
+      SCREENSHOT_DIR: /screenshots
+      npm_config_update_notifier: "false"
+    volumes:
+      - ./e2e:/e2e
+      - e2e-node-modules:/e2e/node_modules
+      - ./screenshots:/screenshots
+    command: sh -c "npm install --no-audit --prefer-offline && node screenshot.mjs"
+
+  shellcheck:
+    profiles: [tools]
+    image: koalaman/shellcheck-alpine:stable
+    working_dir: /mnt
+    volumes:
+      - ..:/mnt:ro
+    command: >-
+      sh -c "find . -name '*.sh' -not -path '*/node_modules/*' -print0 | xargs -0 -r shellcheck -x"
+
+volumes:
+  octoprint-data:
+  agent-data:
+  frontend-node-modules:
+  e2e-node-modules:

@@ -1,0 +1,9 @@
+{
+  "name": "floppyoctotouch-e2e",
+  "private": true,
+  "type": "module",
+  "description": "Playwright screenshots of the dashboard at 1024x600 (runs in the playwright container)",
+  "dependencies": {
+    "playwright": "1.63.0"
+  }
+}

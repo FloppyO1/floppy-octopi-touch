@@ -1,0 +1,46 @@
+# Seed configuration for the development OctoPrint container.
+# Deep-merged into /octoprint/octoprint/config.yaml on the first start only (see init.sh);
+# to re-seed, remove the volume: docker compose down -v
+appearance:
+  name: Tatara A8 (virtual)
+server:
+  firstRun: false
+  onlineCheck:
+    enabled: false
+  pluginBlacklist:
+    enabled: false
+serial:
+  autoconnect: true
+  port: VIRTUAL
+  baudrate: 115200
+printerProfiles:
+  default: _default
+  defaultProfile:
+    name: Tatara A8 (virtual)
+    model: Anet A8 (modified), Marlin 2
+    volume:
+      width: 220
+      depth: 220
+      height: 240
+      formFactor: rectangular
+      origin: lowerleft
+    heatedBed: true
+    heatedChamber: false
+plugins:
+  tracking:
+    enabled: false
+  virtual_printer:
+    enabled: true
+    firmwareName: Marlin 2.1.2.4 (Virtual Tatara A8)
+    m115ReportCapabilities: true
+    capabilities:
+      AUTOREPORT_TEMP: true
+      AUTOREPORT_SD_STATUS: true
+      AUTOREPORT_POS: false
+      EMERGENCY_PARSER: true
+      EXTENDED_M20: true
+      LFN_WRITE: false
+      EEPROM: true
+      PROMPT_SUPPORT: false
+      AUTOLEVEL: false
+      Z_PROBE: false
