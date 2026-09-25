@@ -76,6 +76,7 @@ dev/octoprint/                 seed config.yaml + init.sh for the OctoPrint volu
 dev/e2e/screenshot.mjs         Playwright smoke test/screenshots (own package.json, Playwright 1.63.0);
                                accents.mjs = screenshots of every accent variant
 dev/sample-gcode/              samples with PrusaSlicer PNG/QOI and OrcaSlicer thumbnails (dev/tools/make_sample_gcode.py)
+                               + 3dbenchy_prusaslicer.gcode (real export, Tatara A8 profile, no thumbnail, ~1 h)
 dev/fake-usb/                  mounted read-only in the agent as /media/usb0
 dev/fake-webcam/server.py      MJPEG test pattern (ffmpeg testsrc) on :8080, service `webcam`
 deploy/, scripts/              placeholders (session 9)

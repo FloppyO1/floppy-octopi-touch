@@ -62,7 +62,7 @@ Procedura:
 - **Lingue**: inglese + italiano (selezionabile). **Default al primo avvio: inglese**. Orologio **24h**, fuso orario del Pi.
 - **Conferme**: popup di conferma sulle azioni critiche (stop stampa, elimina file, spegni/riavvia, temperature alte, disattiva motori durante stampa…).
 - **Soglie temperature** (modificabili nelle impostazioni): conferma sopra **hotend 250 °C / piatto 90 °C**; massimo accettato dal NumPad **hotend 275 °C / piatto 110 °C** (se il profilo stampante OctoPrint ha limiti più bassi vincono quelli).
-- **Screensaver**: dopo X minuti di inattività mostra una **vista minimale a caratteri grandi** (progresso se in stampa, altrimenti orologio + temperature). Tocco = ritorno.
+- **Screensaver**: dopo X minuti di inattività mostra una **vista minimale a caratteri grandi** (progresso se in stampa, altrimenti orologio + temperature). Tocco = ritorno. **Opzione (default disattivata)**: in stampa mostra anche la **miniatura del file** accanto alla percentuale, per capire a colpo d'occhio cosa si sta stampando; da spenta il layout resta quello attuale (v0.4.0).
 - **Spegnimento schermo** (opzionale, **default disattivato**): dopo N minuti (default 30) di inattività **solo a stampante ferma** spegne l'uscita HDMI; il tocco la riaccende (il tocco di risveglio non attiva nulla). Mai durante la stampa.
 - **Host action / prompt Marlin**: se il firmware espone `Cap:PROMPT_SUPPORT`, i messaggi `//action:prompt_begin/choice/show/end`, `//action:pause/resume/cancel`, `//action:notification` vengono mostrati come **dialog touch** e la risposta inviata con `M876 S<n>`. Serve per M600 / runout futuri.
 - **Tastiera a schermo**: fatta **dentro l'app**, con lo stesso stile (layout QWERTY IT/EN, tastierino numerico, layout G-code).
@@ -330,7 +330,17 @@ Leggi docs/PLAN.md e CLAUDE.md. Esegui la Sessione 5:
 - Tab USB: endpoint agent /local/usb (list, import con progresso verso /api/files/local, eject), confinato a /media/usb*
   (in dev a dev/fake-usb); test pytest anti path-traversal; aggiornamento quando la chiavetta viene inserita/rimossa (polling
   leggero dell'agent o evento udev → websocket locale).
-- Ricerca file con tastiera a schermo. Chiusura sessione (sezione 3), poi FERMATI.
+- Ricerca file con tastiera a schermo.
+- Miniature anche fuori dal browser file: `thumbnailUrl()` (core/files.ts) usa il fallback dell'agent, così Home
+  e "Pronti da stampare" mostrano le miniature anche senza plugin.
+- Screensaver con miniatura: impostazione `screensaver.showThumbnail` (default false, migrazione schema v4) che
+  nella vista "in stampa" affianca la miniatura (~220 px, a sinistra) alla percentuale grande; se il file non ha
+  miniatura o l'opzione è spenta resta il layout attuale. Interruttore provvisorio nella schermata Sistema
+  temporanea (quello definitivo in S8). Screenshot di entrambe le varianti.
+- Campione reale `dev/sample-gcode/3dbenchy_prusaslicer.gcode` (PrusaSlicer 2.9, profilo Tatara A8, 240 layer,
+  ~1 h, **senza miniatura**): usarlo per il caso "nessuna miniatura", per le info file (tempo/filamento) e per
+  stampe lunghe sulla Virtual Printer. Se l'utente lo riesporta con le miniature, sostituirlo allo stesso percorso.
+- Chiusura sessione (sezione 3), poi FERMATI.
 ```
 
 ### Sessione 6 — Temperature, Movimento, Filamento
@@ -369,7 +379,7 @@ Leggi docs/PLAN.md e CLAUDE.md. Esegui la Sessione 8:
 - Schermata Sistema: RingGauge CPU (con temperatura e frequenza), RAM e disco, aggiornati ogni pochi secondi solo
   mentre la schermata è visibile; info rete (nessuna gestione WiFi completa in v1, solo stato), system commands di OctoPrint
   (riavvio OctoPrint, riavvio/spegnimento Pi) con conferma, riavvio kiosk.
-- Impostazioni: lingua, timeout screensaver, spegnimento schermo (on/off + minuti), beep fine stampa, soglie/massimi
+- Impostazioni: lingua, timeout screensaver, miniatura nello screensaver (on/off), spegnimento schermo (on/off + minuti), beep fine stampa, soglie/massimi
   temperature, capability firmware (auto-rilevate + override), parametri filamento/estrusore, URL webcam manuale,
   API key (sostituzione tramite tastiera, validazione, salvataggio via agent), reset impostazioni.
 - PSU/luci: pulsanti se PSU Control è presente (turnPSUOn/Off/getPSUState) + azioni personalizzate configurabili
@@ -648,3 +658,12 @@ _(ogni sessione aggiunge qui decisioni prese, deviazioni dal piano, problemi ape
 - Comandi utili: `docker compose -f dev/docker-compose.yml stop webcam` (fallback "webcam non raggiungibile");
   `window.__fot.idle.sleep()` / `sleep('off')` in console per vedere screensaver / schermo spento;
   `window.__fot.notices.handleEvent('PrintDone', {name: 'x.gcode', time: 60})` per provare il popup.
+
+**Modifica al piano (2026-09-25, dopo la Sessione 4)**
+- Richiesta dell'utente: nello screensaver in stampa poter mostrare la **miniatura del file**, come opzione
+  (default off: la vista `saver-printing` attuale gli piace così). Aggiunta al requisito "Screensaver"
+  (sezione 1), implementazione in **S5** (serve `/local/thumbnail`, che arriva lì), interruttore definitivo in **S8**.
+- L'utente ha fornito `3dbenchy.gcode` (PrusaSlicer 2.9.6, profilo "Tatara A8"), spostato in
+  `dev/sample-gcode/3dbenchy_prusaslicer.gcode`: viene caricato in OctoPrint da `octoprint-init` come gli altri.
+  Non contiene miniature (`; thumbnails =` vuoto): in PrusaSlicer vanno abilitate in Impostazioni stampante →
+  Generale → Firmware → "Miniature G-code" (es. `16x16/PNG, 220x124/PNG`).
