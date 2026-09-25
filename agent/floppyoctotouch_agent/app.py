@@ -79,6 +79,9 @@ def _static_handler(static_dir: Path):
 
     async def handler(request: web.Request) -> web.StreamResponse:
         rel = request.match_info.get("tail", "")
+        # Unknown agent endpoints are API calls: answer 404, never the SPA page.
+        if rel == "local" or rel.startswith("local/"):
+            raise web.HTTPNotFound()
         candidate = (root / rel).resolve()
         if candidate.is_relative_to(root) and candidate.is_file():
             return web.FileResponse(candidate)
