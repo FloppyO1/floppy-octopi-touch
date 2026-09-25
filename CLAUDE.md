@@ -53,9 +53,14 @@ docker compose -f dev/docker-compose.yml down -v             # wipe OctoPrint/ag
 
 ```
 agent/floppyoctotouch_agent/   config.py, proxy.py, settings.py, app.py, __main__.py; tests in agent/tests
-frontend/src/lib/api/          http.ts, octoprint.ts, socket.ts, temperatures.ts, types.ts
-frontend/src/lib/i18n/         en.json, it.json, index.svelte.ts (t(), runtime locale)
-frontend/src/lib/{stores,ui}/, frontend/src/screens/   (empty, from sessions 2-3)
+frontend/src/lib/api/          http.ts, octoprint.ts (typed REST), agent.ts (/local/*), socket.ts, types.ts
+frontend/src/lib/core/         pure logic + tests: capabilities (M115), hostActions, tempHistory, files,
+                               printerState (phase, plugins), settings (schema/defaults/migrations), format
+frontend/src/lib/stores/       *.svelte.ts singletons (connection, printer/job, temperatures, files, terminal,
+                               events, capabilities, prompt, server, settings) + dataLayer.ts (socket wiring)
+frontend/src/lib/i18n/         en.json, it.json, index.svelte.ts (t(), setLocale())
+frontend/src/lib/ui/           empty (session 3)
+frontend/src/screens/          Debug.svelte (temporary page showing every store, replaced in session 3)
 frontend/preview.html          1024×600 frame around the app (also in the production build)
 dev/docker-compose.yml         dev stack + tool services; dev/docker/*.Dockerfile
 dev/octoprint/                 seed config.yaml + init.sh for the OctoPrint volume
@@ -69,14 +74,28 @@ deploy/, scripts/              placeholders (session 9)
 
 - The `octoprint/octoprint` image already ships a `config.yaml` in the volume: `init.sh` deep-merges the seed
   once (marker `.floppyoctotouch-seeded`). Changing `dev/octoprint/config.yaml` requires `down -v`.
+  The rest of `init.sh` (samples, API key) runs at every `up`, or on demand with `run --rm octoprint-init`.
 - OctoPrint in the image listens on 5000 (haproxy on 80 is unused). Healthcheck uses `/robots.txt`.
 - Windows bind mounts do not deliver inotify events: Vite and watchfiles use polling (already configured).
 - Vite only accepts known hosts: `frontend` is whitelisted for the Playwright container.
 - The Playwright npm version in `dev/e2e/package.json` must match the `mcr.microsoft.com/playwright` image tag.
 - The Virtual Printer reports a `chamber` entry with `null` values: the UI hides heaters without readings.
+- Virtual Printer SD card: files whose name is already 8.3 (e.g. `CUBE.GCO`) are silently dropped from M20
+  (bug in its name map); use long names in `virtualSd/`. `!!DEBUG:action_custom <action> <params>` makes it emit
+  `//action:` lines (host prompts/notifications). OctoPrint only lists SD files after an SD refresh (M20).
+- `-e VAR=/path` in `docker compose run` from Git Bash is rewritten by MSYS into a Windows path: prefix
+  `MSYS_NO_PATHCONV=1` (this is how stray files ended up under `dev/e2e/C:/...` in session 1).
+- Svelte 5: keys added to a deep `$state` proxy are not seen by `in` checks inside an already computed
+  `$derived`. Use `$state.raw` and replace the object (see `capabilities.svelte.ts`).
+- OctoPrint `refs` URLs are absolute to its own host (`http://octoprint:5000/...`): never use them.
+- The Action Command Prompt plugin drops prompt answers unless the firmware reported `Cap:PROMPT_SUPPORT`;
+  `prompt.answer()` then falls back to `M876 S<n>`.
+- In dev the stores are exposed as `window.__fot` (handy for Playwright one-off checks).
 - In the Bash tool, long multi-file heredocs can fail to parse: prefer the Write tool for new files.
 
 ## Current state
 
-v0.1.0 (session 1): dev environment, agent (static, proxy incl. WebSocket, settings, health), minimal page with
-live temperatures. Next: session 2 (data layer). See `docs/PLAN.md` for details and notes between sessions.
+v0.2.0 (session 2): complete data layer (typed REST + socket client, Svelte 5 stores, settings schema v2 with
+migrations synced to the agent, M115 capabilities, Marlin host prompts, file sources), temporary debug page.
+Next: session 3 (design system and app shell; stop after the accent colour screenshots).
+See `docs/PLAN.md` for details and notes between sessions.

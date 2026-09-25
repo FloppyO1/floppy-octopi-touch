@@ -6,6 +6,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-25
+
+### Added
+- Typed OctoPrint REST client: connection, printer (print head, tools, bed, chamber, SD card, raw commands),
+  job, files (list, select/print, move, copy, delete, folders), printer profiles, settings, system commands,
+  SimpleApi plugin calls; agent client for health, settings and (upcoming) USB listing.
+- Push socket client: `reauthRequired` handling, throttle (1 Hz `current` updates), injectable transport for tests.
+- Svelte 5 stores: connection, printer state and job progress (with ETA), temperatures with a circular history
+  buffer, files from local storage, SD card and USB, terminal log, events bus, firmware capabilities
+  (M115 parsing + manual overrides), Marlin host prompts/notifications (answered with `M876`), OctoPrint
+  settings/profile/plugin detection (PSU Control, Slicer Thumbnails, DisplayLayerProgress, Action Command Prompt).
+- Settings store synchronised with the agent: versioned schema (v2) with migrations and defaults (temperature
+  presets, example macros, confirmation/maximum temperatures, screensaver, screen off, print-done beep,
+  filament parameters, capability overrides); the language choice is persisted.
+- Temporary debug page showing every store; formatting helpers; 53 unit tests.
+- Development data: an `examples/` folder in local storage and a file on the virtual SD card.
+
+### Fixed
+- The agent answers 404 for unknown `/local/*` endpoints instead of the SPA page.
+- Removed screenshots committed by mistake under `dev/e2e/` (MSYS path rewriting).
+
 ## [0.1.0] - 2026-09-25
 
 ### Added

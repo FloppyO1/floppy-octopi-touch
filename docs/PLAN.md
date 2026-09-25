@@ -437,7 +437,7 @@ _Legenda: `[ ]` da fare · `[~]` in corso (interrotta se la trovi a inizio sessi
 
 - [x] Sessione 0 — Raccolta requisiti e piano (2026-09-25), integrazione requisiti mancanti (2026-09-25)
 - [x] Sessione 1 — Fondamenta, repo e ambiente Docker (2026-09-25, v0.1.0)
-- [ ] Sessione 2 — Data layer
+- [x] Sessione 2 — Data layer (2026-09-25, v0.2.0)
 - [ ] Sessione 3 — Design system e shell
 - [ ] Sessione 4 — Home, controllo stampa, screensaver, notifiche
 - [ ] Sessione 5 — File
@@ -500,3 +500,48 @@ _(ogni sessione aggiunge qui decisioni prese, deviazioni dal piano, problemi ape
 - Su richiesta dell'utente aggiunti gli **indicatori ad anello** (immagine di riferimento in stile "OctoPrint status
   screen"): requisito in sezione 1, componente RingGauge in S3, layout Home con anelli in S4, anelli CPU/RAM/disco
   e metriche agent in S8. Non era previsto prima. Adattarli al tema scuro e al colore d'accento scelto in S3.
+
+**Sessione 2 — Data layer (2026-09-25, v0.2.0)**
+- Fatto: client REST tipizzato (`lib/api/octoprint.ts`, `agent.ts`), socket con `reauthRequired` e throttle 2
+  (≈1 Hz; OctoPrint accumula log e temperature, non si perde nulla), logica pura testata in `lib/core/`
+  (M115, host action, buffer circolare temperature, albero file, fase stampante, rilevamento plugin, schema
+  impostazioni, formattazione), store Svelte 5 in `lib/stores/` + `dataLayer.ts` che collega il socket agli store,
+  pagina di debug temporanea `screens/Debug.svelte`. 53 test vitest, 11 pytest; bundle 27,4 KB gzip.
+- Verificato contro la Virtual Printer (Playwright, anche sulla build servita dall'agent): dati live, M115 inviato
+  dalla dashboard se il report manca, capability, plugin, file local + cartella + SD, prompt host mostrato e
+  risposto (`M876 S0`), notifica, lingua persistita dopo reload, **riconnessione del socket dopo il riavvio di
+  OctoPrint** (punto aperto da S1 chiuso), stampa → pausa → annullamento con eventi e job store coerenti.
+- Decisioni:
+  - `/api/files?recursive=true` restituisce local **e** sdcard in una sola chiamata (si separa per `origin`).
+  - Plugin rilevati dalle chiavi `plugins` di `/api/settings` (niente permessi admin, `/plugin/pluginmanager/plugins`
+    è più lento).
+  - Prompt host letti dai log live (mai da `history`, per non riaprire prompt già risposti). Risposta tramite API
+    del plugin bundled Action Command Prompt **solo se** il firmware ha riportato `Cap:PROMPT_SUPPORT` (altrimenti
+    il plugin scarta la risposta in silenzio), altrimenti `M876 S<n>` via `/api/printer/command`. Il plugin forza
+    l'invio di M876 anche mentre Marlin è in attesa dell'utente.
+  - Capability: `detected` (M115) + override `auto/on/off` nelle impostazioni; M600, M701/M702 e MBL manuale
+    solo manuali. M115 inviato una volta se il report non è noto; reset su `Disconnected`.
+  - Schema impostazioni v2 (v1 = default dell'agent di S1): preset PLA/PETG/TPU, 4 macro di esempio, soglie
+    250/90 e massimi 275/110, screensaver 5 min, spegnimento schermo off/30 min, beep `M300 S880 P400`,
+    filamento prudente (tipo `unknown`, bowden 0, carico lento 100 mm a 150 mm/min, scarico 100 mm, spurgo 20 mm,
+    flag `configured` per l'avviso al primo wizard). Nomi di preset/macro = dati utente, non passano da i18n.
+  - Eventi applicativi `host:prompt`, `host:promptClosed`, `host:notification`, `host:action` sul bus `events`
+    (utili in S4). Messaggi `plugin` conservati per plugin in `server.pluginMessages` (DisplayLayerProgress in S4).
+- Deviazioni / scoperte:
+  - Bug Svelte 5 (reattività): chiavi aggiunte a un proxy `$state` profondo non viste da `in` in un `$derived`
+    già calcolato → `capabilities` usa `$state.raw` con sostituzione dell'oggetto (test di regressione aggiunto).
+  - Bug della Virtual Printer: i file SD con nome già 8.3 spariscono da M20 → in `init.sh` si usa
+    `virtualSd/sd-cube.gcode`; aggiunta anche la cartella `uploads/examples/`.
+  - I 3 PNG finiti per errore sotto `dev/e2e/C:/...` nel commit di S1 venivano dalla riscrittura MSYS di
+    `-e SCREENSHOT_DIR=/tmp`: rimossi (gotcha in CLAUDE.md).
+  - L'agent rispondeva con la pagina SPA anche a `/local/<sconosciuto>`: ora 404 (test aggiunto).
+  - `temperatures.ts` di S1 sostituito da `core/tempHistory.ts` + store.
+- Problemi aperti / note per le prossime sessioni:
+  - `/local/usb` non esiste ancora (S5): lo store USB resta `unavailable` e il browser logga un 404 a ogni avvio.
+  - La pagina di debug (e `App.svelte`) va sostituita dalla shell in S3; `window.__fot` espone gli store solo in dev.
+  - Il servizio webcam, PSU Control e azioni personalizzate non sono nello schema impostazioni: aggiungerli con
+    una migrazione v3 quando servono (S4/S8).
+  - `printer.currentZ` resta `null` con la Virtual Printer (non invia la Z durante il file di prova).
+- Comandi utili: `docker compose -f dev/docker-compose.yml run --rm octoprint-init` (riapplica campioni/SD senza
+  `down -v`); smoke test sulla build dell'agent:
+  `MSYS_NO_PATHCONV=1 docker compose -f dev/docker-compose.yml run --rm -e BASE_URL=http://agent:8765 -e SCREENSHOT_DIR=/tmp playwright`.
