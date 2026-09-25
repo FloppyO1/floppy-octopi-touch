@@ -1,0 +1,44 @@
+# Node / frontend
+node_modules/
+frontend/dist/
+*.tsbuildinfo
+.vite/
+.svelte-kit/
+
+# Python / agent
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+build/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Dev data
+dev/screenshots/*
+!dev/screenshots/.gitkeep
+dev/data/
+dev/fake-usb/**
+!dev/fake-usb/.gitkeep
+!dev/fake-usb/README.md
+
+# Release artifacts
+release/
+*.tar.gz
+*.sha256
+
+# Editors / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini

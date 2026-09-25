@@ -1,0 +1,8 @@
+# Normalize line endings: the code runs on Linux (containers, Raspberry Pi).
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.ico binary
+*.woff binary
+*.woff2 binary
