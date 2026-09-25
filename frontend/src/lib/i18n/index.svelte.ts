@@ -1,4 +1,7 @@
-/** Minimal runtime i18n (en/it). The full store with persistence arrives with the data layer. */
+/**
+ * Runtime i18n (en/it, default en). The chosen language is persisted by the settings store
+ * (`settings.setLanguage()`), which calls `setLocale()`.
+ */
 import en from './en.json';
 import it from './it.json';
 
@@ -7,6 +10,11 @@ export type Locale = keyof typeof messages;
 export type MessageKey = keyof typeof en;
 
 export const i18n = $state<{ locale: Locale }>({ locale: 'en' });
+
+export function setLocale(locale: Locale): void {
+  i18n.locale = locale in messages ? locale : 'en';
+  if (typeof document !== 'undefined') document.documentElement.lang = i18n.locale;
+}
 
 export function format(template: string, params?: Record<string, string | number>): string {
   if (!params) return template;
