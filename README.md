@@ -3,11 +3,12 @@
 A touch-first dashboard for [OctoPrint](https://octoprint.org/), designed for a Raspberry Pi 4 running
 OctoPi with a 7" 1024×600 HDMI touch screen, shown full screen in a Chromium kiosk.
 
-> **Status: early development (v0.2.0).** The foundations are in place (development environment, local agent,
-> live connection to OctoPrint, complete data layer shown on a temporary debug page). The actual screens are
-> being built session by session, see [`docs/PLAN.md`](docs/PLAN.md) (Italian) and [`CHANGELOG.md`](CHANGELOG.md).
+> **Status: early development (v0.3.0).** Development environment, local agent, complete data layer, design
+> system and app shell (sidebar, status bar, connection overlays, host prompts) are in place; Home is a first
+> version and the other screens are placeholders. The screens are being built session by session, see
+> [`docs/PLAN.md`](docs/PLAN.md) (Italian) and [`CHANGELOG.md`](CHANGELOG.md).
 
-![Data layer debug page at 1024×600](docs/images/debug-v0.2.0.png)
+![Home screen at 1024×600 while printing](docs/images/home-v0.3.0.png)
 
 ## Planned features
 
@@ -57,12 +58,21 @@ The development OctoPrint is prepared automatically on first start (`octoprint-i
 (plus an `examples/` folder and one file on the virtual SD card).
 To start from scratch: `docker compose -f dev/docker-compose.yml down -v`.
 
-Until the real screens exist, the app shows a **debug page** with every data store (connection, printer state,
-job, temperatures, files, firmware capabilities, plugins, host prompts, settings, events, terminal). In the
-Vite dev server the stores are also available in the browser console as `window.__fot`.
+Pages and URL options useful while developing:
+
+| URL | What |
+|---|---|
+| `/#/home`, `/#/files`, … `/#/system` | a screen of the app (the hash keeps the current screen across reloads) |
+| `/ui-gallery` | every design-system component with demo data (dev server only) |
+| `/debug` | every data store: connection, printer state, job, temperatures, files, capabilities, plugins, prompts, settings, events, terminal (dev server only) |
+| `?accent=teal\|amber\|indigo` | previews an accent colour (the saved one is chosen on the System screen) |
+| `?kiosk=1` | kiosk hardening: hidden cursor, no context menu, no zoom, no text selection or dragging |
+
+In the Vite dev server the stores are also available in the browser console as `window.__fot`.
 
 The Virtual Printer can emit Marlin host actions to test prompts and notifications, e.g. send
-`!!DEBUG:action_custom notification Hello` from the OctoPrint terminal (the debug page has buttons for this).
+`!!DEBUG:action_custom notification Hello` from the OctoPrint terminal (the `/debug` page has buttons for this).
+Prompts are shown only when the firmware reports `Cap:PROMPT_SUPPORT` (or the override is on).
 
 ### OctoPrint API key
 
@@ -90,7 +100,8 @@ All commands are run from the repository root.
 | `docker compose -f dev/docker-compose.yml run --rm agent-test` | agent: ruff lint + format check + pytest |
 | `docker compose -f dev/docker-compose.yml run --rm frontend-test` | frontend: svelte-check + tsc + vitest |
 | `docker compose -f dev/docker-compose.yml run --rm build` | production build of the frontend into `frontend/dist` |
-| `docker compose -f dev/docker-compose.yml run --rm playwright` | smoke test (live data, host prompt, language persistence) + 1024×600 screenshots into `dev/screenshots/` |
+| `docker compose -f dev/docker-compose.yml run --rm playwright` | smoke test (data layer, every screen, NumPad and confirmations, host prompt, printer overlay, kiosk mode, language) + 1024×600 screenshots into `dev/screenshots/` |
+| `docker compose -f dev/docker-compose.yml run --rm playwright sh -c "npm install && node accents.mjs"` | screenshots of Home, NumPad and gallery for each accent colour |
 | `docker compose -f dev/docker-compose.yml run --rm shellcheck` | lint every shell script |
 
 Sample G-code files with PrusaSlicer (PNG, QOI) and OrcaSlicer thumbnails live in `dev/sample-gcode/` and are

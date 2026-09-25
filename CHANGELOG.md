@@ -6,6 +6,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-25
+
+### Added
+- Design tokens (CSS custom properties): dark palette, state colours (ok, heating, cooling, paused, error, idle),
+  type scale for 50-80 cm viewing, spacing, radii, shadows, layers; Inter variable font and Lucide icons
+  bundled (works offline).
+- Accent colour variants teal (default), amber and indigo, saved in the settings (`accent`) and selectable on
+  the temporary System screen; `?accent=` previews one.
+- Components: Button, IconButton, Card, Toggle, Slider, Stepper (hold to repeat), Select, Modal, ConfirmDialog,
+  NumPad (limits, presets), OnScreenKeyboard (EN/IT QWERTY, symbols, G-code layout), text input sheet,
+  InputField (opens the NumPad or the keyboard), RingGauge (SVG, target tick, tones, sizes S/M/L), InfoRow,
+  Spinner, Toast, PromptDialog; promise-based `dialogs.confirm/number/text()` and `toast.show()`.
+- App shell at 1024×600: sidebar with 8 screens, status bar (printer state, job %, temperatures, connection,
+  24 h clock), "Connecting to OctoPrint" overlay, "Printer disconnected" overlay with port/baud Connect form.
+- First Home screen with ring gauges (tap a heater to set its target, confirmation above the threshold),
+  job summary with pause/resume/stop (confirmed) and status rows; placeholders for the other screens.
+- Marlin host prompts shown as a touch dialog, host notifications as toasts.
+- Kiosk hardening with `?kiosk=1` (hidden cursor, no context menu, zoom, selection or dragging).
+- Dev-only pages `/ui-gallery` and `/debug` (not in the production build); smoke test covering the shell and
+  a script for accent screenshots.
+
 ## [0.2.0] - 2026-09-25
 
 ### Added

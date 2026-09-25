@@ -55,16 +55,20 @@ docker compose -f dev/docker-compose.yml down -v             # wipe OctoPrint/ag
 agent/floppyoctotouch_agent/   config.py, proxy.py, settings.py, app.py, __main__.py; tests in agent/tests
 frontend/src/lib/api/          http.ts, octoprint.ts (typed REST), agent.ts (/local/*), socket.ts, types.ts
 frontend/src/lib/core/         pure logic + tests: capabilities (M115), hostActions, tempHistory, files,
-                               printerState (phase, plugins), settings (schema/defaults/migrations), format
+                               printerState (phase, tone, plugins), settings (schema/defaults/migrations, accent),
+                               format, gauge (ring geometry, heater tone), numpad, keyboard (layouts, editing)
 frontend/src/lib/stores/       *.svelte.ts singletons (connection, printer/job, temperatures, files, terminal,
-                               events, capabilities, prompt, server, settings) + dataLayer.ts (socket wiring)
+                               events, capabilities, prompt, server, settings, nav, clock) + dataLayer.ts (socket wiring)
 frontend/src/lib/i18n/         en.json, it.json, index.svelte.ts (t(), setLocale())
-frontend/src/lib/ui/           empty (session 3)
-frontend/src/screens/          Debug.svelte (temporary page showing every store, replaced in session 3)
+frontend/src/lib/ui/           design system: tokens.css, components (Button, Card, Modal, NumPad, OnScreenKeyboard,
+                               RingGauge, …), dialogs.svelte.ts / toast.svelte.ts services, press.ts, theme.ts, kiosk.ts
+frontend/src/shell/            Shell, Sidebar, StatusBar, ConnectionOverlay, PrinterOverlay, screens.ts (registry)
+frontend/src/screens/          Home (first version), System (temporary), Placeholder; dev/Gallery + dev/Debug (dev only)
 frontend/preview.html          1024×600 frame around the app (also in the production build)
 dev/docker-compose.yml         dev stack + tool services; dev/docker/*.Dockerfile
 dev/octoprint/                 seed config.yaml + init.sh for the OctoPrint volume
-dev/e2e/screenshot.mjs         Playwright smoke test/screenshots (own package.json, Playwright 1.63.0)
+dev/e2e/screenshot.mjs         Playwright smoke test/screenshots (own package.json, Playwright 1.63.0);
+                               accents.mjs = screenshots of every accent variant
 dev/sample-gcode/              samples with PrusaSlicer PNG/QOI and OrcaSlicer thumbnails (dev/tools/make_sample_gcode.py)
 dev/fake-usb/                  mounted read-only in the agent as /media/usb0
 deploy/, scripts/              placeholders (session 9)
@@ -90,12 +94,21 @@ deploy/, scripts/              placeholders (session 9)
 - OctoPrint `refs` URLs are absolute to its own host (`http://octoprint:5000/...`): never use them.
 - The Action Command Prompt plugin drops prompt answers unless the firmware reported `Cap:PROMPT_SUPPORT`;
   `prompt.answer()` then falls back to `M876 S<n>`.
-- In dev the stores are exposed as `window.__fot` (handy for Playwright one-off checks).
+- In dev the stores are exposed as `window.__fot` (handy for Playwright one-off checks); not in the production
+  build, so the smoke test skips the parts that need it when `BASE_URL` is the agent.
+- Touch feedback uses the `pressable` attachment (`data-pressed`): style it as `.x:global([data-pressed])`,
+  a plain `[data-pressed]` selector is dropped by Svelte as unused.
+- Icons: import each one as `@lucide/svelte/icons/<name>` (never the barrel). Dialogs: use `dialogs.*()` and
+  `toast.show()`, never native inputs/`confirm()`. Every new screen goes into `src/shell/screens.ts`.
+- The agent dev image stores the package version at build time: after a version bump run
+  `docker compose -f dev/docker-compose.yml build agent` (otherwise `/local/health` reports the old version).
+- Screenshots can fail with `EINVAL` on the Windows bind mount when the PNG is open in the IDE: just rerun.
 - In the Bash tool, long multi-file heredocs can fail to parse: prefer the Write tool for new files.
 
 ## Current state
 
-v0.2.0 (session 2): complete data layer (typed REST + socket client, Svelte 5 stores, settings schema v2 with
-migrations synced to the agent, M115 capabilities, Marlin host prompts, file sources), temporary debug page.
-Next: session 3 (design system and app shell; stop after the accent colour screenshots).
+v0.3.0 (session 3): design system (tokens, Inter + Lucide bundled, components, dialogs/toast services),
+app shell (sidebar, status bar, connection/printer overlays, host prompt dialog), first Home with ring gauges,
+accent teal by default (amber/indigo selectable, `accent` setting), `?kiosk=1` hardening, dev pages
+`/ui-gallery` and `/debug`. Next: session 4 (Home, print control, screensaver, notifications).
 See `docs/PLAN.md` for details and notes between sessions.

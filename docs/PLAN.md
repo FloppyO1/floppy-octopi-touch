@@ -67,7 +67,7 @@ Procedura:
 - **Host action / prompt Marlin**: se il firmware espone `Cap:PROMPT_SUPPORT`, i messaggi `//action:prompt_begin/choice/show/end`, `//action:pause/resume/cancel`, `//action:notification` vengono mostrati come **dialog touch** e la risposta inviata con `M876 S<n>`. Serve per M600 / runout futuri.
 - **Tastiera a schermo**: fatta **dentro l'app**, con lo stesso stile (layout QWERTY IT/EN, tastierino numerico, layout G-code).
 - **Navigazione**: **sidebar sinistra con 8 icone** (~88 px di larghezza, pulsanti ~64 px) + **status bar in alto** (~48 px) → area contenuto ~936×552.
-- **Colore d'accento**: da decidere in Sessione 3 — Claude propone **2-3 varianti** (screenshot a 1024×600) e l'utente sceglie.
+- **Colore d'accento**: scelto in Sessione 3 → **teal** (default); ambra e indaco restano selezionabili (impostazione `accent`, UI definitiva in S8).
 - **Indicatori ad anello (gauge)**: i valori principali si mostrano come **anelli circolari** con il valore grande al
   centro e un'etichetta sotto (riferimento: immagine fornita dall'utente il 2026-09-25, stile "OctoPrint status
   screen"): hotend e piatto con **attuale al centro + "Target: N °C"** sotto e tacca del target sull'anello,
@@ -438,7 +438,7 @@ _Legenda: `[ ]` da fare · `[~]` in corso (interrotta se la trovi a inizio sessi
 - [x] Sessione 0 — Raccolta requisiti e piano (2026-09-25), integrazione requisiti mancanti (2026-09-25)
 - [x] Sessione 1 — Fondamenta, repo e ambiente Docker (2026-09-25, v0.1.0)
 - [x] Sessione 2 — Data layer (2026-09-25, v0.2.0)
-- [~] Sessione 3 — Design system e shell (iniziata 2026-09-25)
+- [x] Sessione 3 — Design system e shell (2026-09-25, v0.3.0)
 - [ ] Sessione 4 — Home, controllo stampa, screensaver, notifiche
 - [ ] Sessione 5 — File
 - [ ] Sessione 6 — Temperature, Movimento, Filamento
@@ -546,9 +546,51 @@ _(ogni sessione aggiunge qui decisioni prese, deviazioni dal piano, problemi ape
   `down -v`); smoke test sulla build dell'agent:
   `MSYS_NO_PATHCONV=1 docker compose -f dev/docker-compose.yml run --rm -e BASE_URL=http://agent:8765 -e SCREENSHOT_DIR=/tmp playwright`.
 
-**Sessione 3 — in corso (2026-09-25)**
-- Stop intermedio raggiunto: token, componenti, shell, bozza Home, gallery `/ui-gallery` e pagina `/debug` (solo dev)
-  fatti; screenshot `dev/screenshots/accent-{amber,teal,indigo}-{home,numpad,gallery}.png` (script `dev/e2e/accents.mjs`).
-  Accento provvisorio `teal` (`DEFAULT_ACCENT` in `lib/ui/theme.ts`), in attesa della scelta dell'utente.
-- Da fare dopo la scelta: fissare l'accento, rifinire, aggiornare lo smoke test (`screenshot.mjs`) alla shell,
-  chiusura sessione (v0.3.0).
+**Sessione 3 — Design system e shell (2026-09-25, v0.3.0)**
+- Fatto: token CSS (`lib/ui/tokens.css`: superfici, colori di stato ok/heating/cooling/paused/error/idle, scala
+  tipografica 13-64 px, spaziature, raggi, ombre, layer z-index), font Inter variabile (solo subset latin +
+  latin-ext) e icone Lucide (`@lucide/svelte/icons/<nome>`, una per import) bundlati. Componenti in `lib/ui/`:
+  Button, IconButton, Card, Toggle, Slider, Stepper (pressione prolungata = ripetizione), Select (modal, niente
+  `<select>` nativo), Modal, ConfirmDialog, NumPad (limiti, preset che inviano subito), OnScreenKeyboard (QWERTY
+  EN/IT con àèéìòù, simboli, layout G-code, shift/caps lock, backspace con ripetizione), TextInputSheet,
+  InputField, RingGauge (SVG 270°, tacca target, toni, S/M/L, stato n.d., tappabile), InfoRow, Spinner, Toast,
+  PromptDialog. Servizi `dialogs.confirm/number/text()` (promise, a pila) e `toast.show()`.
+- Shell 1024×600 (`src/shell/`): sidebar 88 px con 8 pulsanti 72×64 con etichetta, status bar 48 px (pill stato
+  + job %, temperature compatte colorate, indicatore connessione, orologio 24 h), contenuto 936×552; schermata
+  corrente nello store `nav` e nell'hash (`#/files`). Overlay "Connessione a OctoPrint…" (sopra tutto, dopo
+  800 ms, con motivo: agent giù, API key mancante/rifiutata, OctoPrint giù) e "Stampante disconnessa/errore"
+  (solo sulle schermate che richiedono la stampante; porta/baud da `/api/connection`, preferenze preselezionate,
+  Connetti). PromptDialog collegato al prompt store; notifiche host come toast.
+- Home prima versione (anelli hotend/piatto/ventola/job, layer solo con DisplayLayerProgress; tap sul riscaldatore
+  → NumPad con preset → conferma sopra 250/90 → target; card lavoro con barra, tempi, pausa/riprendi/stop con
+  conferma; righe di stato), schermata Sistema provvisoria (lingua, accento, versioni), placeholder per le altre.
+- Kiosk `?kiosk=1`: cursore nascosto, niente menu contestuale, drag, selezione, zoom (pinch/ctrl+rotella/tasti).
+- Pagine solo dev `/ui-gallery` e `/debug` (la pagina di debug di S2 spostata in `screens/dev/`), escluse dalla
+  build. Smoke test riscritto: data layer su `/debug`, tutte le schermate, NumPad → conferma, prompt host con
+  risposta M876, toast notifica, overlay stampante con riconnessione, kiosk, gallery e tastiera; gira anche sulla
+  build servita dall'agent (senza le parti che usano `window.__fot`). 66 test vitest; bundle JS 50,2 KB gzip
+  (+ CSS 5,2 KB, font 133 KB non compressi).
+- Decisioni:
+  - **Accento: teal** (scelta dell'utente); ambra e indaco restano come opzione: campo `accent` nelle impostazioni
+    (aggiunto senza bump di schema, arriva dal merge dei default), selettore provvisorio nella schermata Sistema,
+    UI definitiva in S8. Con ambra il colore "heating" si sposta verso il rosso; resta vicino al giallo della pausa.
+  - Le varianti `[data-accent]` funzionano su qualsiasi elemento (usato per i campioni colore).
+  - Feedback al tocco con l'attachment `pressable` (`data-pressed`), perché `:active` su touch in Chromium arriva
+    in ritardo; negli stili serve `:global([data-pressed])`.
+  - I preset del NumPad inviano subito il valore (un tocco solo); la conferma sopra soglia è del chiamante
+    (`screens/heaterTarget.ts`, riusabile in S6).
+  - Placeholder e Sistema provvisorio leggono la schermata da `nav`; le schermate non ricevono props.
+- Deviazioni / scoperte:
+  - L'agent in dev riportava ancora 0.1.0: la versione è nei metadati dell'immagine → dopo un bump serve
+    `docker compose -f dev/docker-compose.yml build agent` (gotcha in CLAUDE.md).
+  - Screenshot a volte in errore `EINVAL` sul bind mount Windows se il PNG è aperto nell'IDE: basta rilanciare.
+  - Il PromptDialog è già collegato alla shell (previsto in S4): S4 deve solo verificarlo nei flussi M600/runout.
+  - Il `printTime` della Virtual Printer resta 0:00 nei primi secondi di stampa (dato di OctoPrint, non della UI).
+- Problemi aperti / note per le prossime sessioni:
+  - Ventola: nessun dato dal socket; in S4 tracciare l'ultimo M106/M107 inviato o letto dal log.
+  - La card lavoro della Home ha spazio libero sotto i tempi: in S4 ospiterà feedrate/flow/ventola e thumbnail.
+  - Rete/Wi-Fi nella status bar non ancora mostrati (dati da `/local/system` in S8).
+  - Stato "stampante disconnessa" non blocca Files/Terminale/Sistema (`needsPrinter` in `shell/screens.ts`).
+- Comandi utili: screenshot degli accenti
+  `docker compose -f dev/docker-compose.yml run --rm playwright sh -c "npm install && node accents.mjs"`;
+  anteprima di un accento: `http://localhost:5173/?accent=amber`.

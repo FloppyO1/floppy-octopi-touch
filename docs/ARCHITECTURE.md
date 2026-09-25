@@ -56,18 +56,46 @@ session 1, which the frontend migrates on first load.
 ## Frontend
 
 Svelte 5 (runes) + TypeScript, built by Vite into static files. No runtime dependency on the Internet: fonts and
-icons will be bundled.
+icons are bundled.
 
 | Folder | Content |
 |---|---|
 | `src/lib/api/` | transport: `http.ts` (JSON helpers, path encoding), `octoprint.ts` (typed REST client), `agent.ts` (`/local/*`), `socket.ts` (push API), `types.ts` (OctoPrint 1.11 types) |
-| `src/lib/core/` | pure, unit-tested logic: M115 capabilities, host action parser, temperature ring buffer, file tree helpers, printer phase and plugin detection, settings schema/migrations, formatting |
+| `src/lib/core/` | pure, unit-tested logic: M115 capabilities, host action parser, temperature ring buffer, file tree helpers, printer phase/tone and plugin detection, settings schema/migrations, formatting, gauge geometry, NumPad entry, keyboard layouts |
 | `src/lib/stores/` | Svelte 5 stores (classes with `$state`/`$derived`, one singleton each) and `dataLayer.ts`, which wires the socket to them |
 | `src/lib/i18n/` | `en.json`, `it.json`, `t()`, `setLocale()` (default English) |
-| `src/screens/` | screens; for now only the temporary `Debug.svelte` |
+| `src/lib/ui/` | design system: tokens, components, `dialogs`/`toast` services, `pressable` attachment, theme (accent) and kiosk helpers |
+| `src/shell/` | app shell: sidebar, status bar, screen registry, connection and printer overlays |
+| `src/screens/` | screens (`Home`, temporary `System`, `Placeholder`) and dev-only pages in `dev/` (`Gallery`, `Debug`) |
 
 OctoPrint returns absolute `refs` URLs built from its own host (e.g. `http://octoprint:5000/...` in Docker):
 the client never uses them and always builds relative paths.
+
+### Design system and shell
+
+- **Tokens** (`src/lib/ui/tokens.css`): colours (surfaces, text, state colours `--ok`, `--heating`, `--cooling`,
+  `--paused`, `--error`, `--idle`), type scale (`--fs-xs` 13 px … `--fs-display` 64 px), spacing, radii,
+  shadows, touch sizes (`--touch` 56 px, `--touch-lg` 64 px), layout (`--sidebar-w`, `--statusbar-h`) and
+  z-index layers. Components never use raw colours.
+- **Accent**: `data-accent="teal|amber|indigo"` on `<html>` (any element works too, e.g. swatches). The value
+  comes from the `accent` setting (applied when the settings load); `?accent=` overrides it for previews.
+- **Font and icons**: Inter variable (Latin and Latin Extended subsets only) via `@fontsource-variable/inter`,
+  Lucide icons imported one by one from `@lucide/svelte/icons/<name>` (tree-shaken).
+- **Touch feedback**: the `pressable` attachment (`{@attach pressable}`) sets `data-pressed` from pointerdown to
+  pointerup, because Chromium delays `:active` on touch screens. Styles use `:global([data-pressed])`, otherwise
+  Svelte drops the selector as unused.
+- **Dialogs**: `dialogs.confirm()`, `dialogs.number()` and `dialogs.text()` return promises and are rendered by
+  `DialogHost` (mounted once in `App.svelte`) as a stack, so a confirmation can follow a NumPad. The NumPad and
+  the text sheet (on-screen keyboard) never use native inputs. `toast.show()` is rendered by `ToastHost`.
+- **Shell** (`src/shell/`): `Shell` = `Sidebar` (88 px) + `StatusBar` (48 px) + content area (936×552).
+  `screens.ts` is the screen registry (icon, component, whether the "printer disconnected" overlay applies).
+  The current screen lives in the `nav` store and in the URL hash. `ConnectionOverlay` covers everything while
+  the agent/OctoPrint/socket are not ready (after 800 ms, to avoid flashes); `PrinterOverlay` covers printer
+  screens while the serial connection is down and offers port/baud selection and Connect.
+- **Kiosk hardening** (`src/lib/ui/kiosk.ts`, `?kiosk=1`): hidden cursor, and prevented context menu, drag,
+  text selection, pinch/ctrl+wheel/keyboard zoom.
+- **Dev pages**: `/ui-gallery` and `/debug` are loaded with dynamic imports guarded by `import.meta.env.DEV`,
+  so they are not part of the production build.
 
 ### Live updates (push API)
 
@@ -105,6 +133,7 @@ and SD card in one call) and `/local/usb`. After that REST is only used on event
 | `prompt` | `//action:` lines of live logs (not `history`, to avoid replaying answered prompts) | answers via the Action Command Prompt plugin when the firmware reported `PROMPT_SUPPORT`, else `M876 S<n>` |
 | `files` | `/api/files`, `/local/usb` | USB status `unavailable` until the agent endpoint exists (session 5) |
 | `server` | `/api/settings`, `/api/printerprofiles`, `plugin` messages | plugin detection from the `plugins` keys of the settings |
+| `nav`, `clock` | URL hash / timer | current screen; wall clock ticking every second |
 | `events` | `event` messages + `host:prompt`, `host:promptClosed`, `host:notification`, `host:action` | `events.on(type, handler)`, last 50 kept |
 | `settings` | `/local/settings` | migrated on load, saved 400 ms after `settings.update()` |
 
