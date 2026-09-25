@@ -18,7 +18,15 @@ class Config:
     port: int = 8765
     static_dir: Path = Path("/opt/floppyoctotouch/frontend")
     data_dir: Path = Path("~/.config/floppyoctotouch")
-    usb_roots: list[Path] = field(default_factory=lambda: [Path("/media")])
+    # OctoPrint's local storage, read directly for thumbnails (HTTP download as a fallback).
+    uploads_dir: Path = Path("~/.octoprint/uploads")
+    # Glob patterns of USB stick mount points (mounted read-only by the system).
+    usb_roots: list[Path] = field(default_factory=lambda: [Path("/media/usb*")])
+    # Unmounts a stick ("{path}" = mount point); empty = only hide it (development).
+    usb_eject_command: list[str] = field(
+        default_factory=lambda: ["systemd-mount", "--umount", "{path}"]
+    )
+    usb_max_file_mb: int = 1024
     # camera-streamer on OctoPi; `/webcam/*` is proxied here with the prefix removed (like haproxy).
     webcam_url: str = "http://127.0.0.1:8080"
     # "wlr-randr" (HDMI output of the cage session) or "none" (only logs, for development).
@@ -30,7 +38,10 @@ class Config:
         self.webcam_url = self.webcam_url.rstrip("/")
         self.static_dir = Path(self.static_dir).expanduser()
         self.data_dir = Path(self.data_dir).expanduser()
+        self.uploads_dir = Path(self.uploads_dir).expanduser()
         self.usb_roots = [Path(p).expanduser() for p in self.usb_roots]
+        self.usb_eject_command = [str(part) for part in self.usb_eject_command]
+        self.usb_max_file_mb = int(self.usb_max_file_mb)
 
 
 _ENV = {
@@ -40,7 +51,10 @@ _ENV = {
     "FOT_PORT": "port",
     "FOT_STATIC_DIR": "static_dir",
     "FOT_DATA_DIR": "data_dir",
+    "FOT_UPLOADS_DIR": "uploads_dir",
     "FOT_USB_ROOTS": "usb_roots",
+    "FOT_USB_EJECT_COMMAND": "usb_eject_command",
+    "FOT_USB_MAX_FILE_MB": "usb_max_file_mb",
     "FOT_WEBCAM_URL": "webcam_url",
     "FOT_DISPLAY_BACKEND": "display_backend",
     "FOT_DISPLAY_OUTPUT": "display_output",
@@ -64,6 +78,10 @@ def load_config(environ: dict[str, str] | None = None) -> Config:
 
     if isinstance(values.get("usb_roots"), str):
         values["usb_roots"] = [p for p in str(values["usb_roots"]).split(":") if p]
+    if isinstance(values.get("usb_eject_command"), str):
+        # Space separated in the environment; "none" disables the command.
+        command = str(values["usb_eject_command"])
+        values["usb_eject_command"] = [] if command.strip() == "none" else command.split()
     if "port" in values:
         values["port"] = int(values["port"])  # type: ignore[arg-type]
 

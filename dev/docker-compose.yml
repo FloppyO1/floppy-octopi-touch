@@ -72,6 +72,9 @@ services:
       FOT_DATA_DIR: /data
       FOT_STATIC_DIR: /frontend/dist
       FOT_USB_ROOTS: /media/usb0
+      FOT_UPLOADS_DIR: /octoprint/octoprint/uploads
+      # No udev/systemd in Docker: "eject" only hides the fake stick until its content changes.
+      FOT_USB_EJECT_COMMAND: none
       FOT_WEBCAM_URL: http://webcam:8080
       # No HDMI output to switch in Docker: /local/display only logs.
       FOT_DISPLAY_BACKEND: none
@@ -82,6 +85,8 @@ services:
       - ../frontend:/frontend:ro
       - agent-data:/data
       - ./fake-usb:/media/usb0:ro
+      # OctoPrint's uploads, read-only, for the thumbnail extraction (as on the Pi).
+      - octoprint-data:/octoprint:ro
 
   frontend:
     build: *frontend-build
@@ -109,6 +114,7 @@ services:
     image: floppyoctotouch-agent-dev
     volumes:
       - ../agent:/app
+      - ./sample-gcode:/samples:ro
     command: sh -c "ruff check . && ruff format --check . && pytest -q"
 
   frontend-test:
@@ -144,6 +150,8 @@ services:
       - ./e2e:/e2e
       - e2e-node-modules:/e2e/node_modules
       - ./screenshots:/screenshots
+      # Writable here: the smoke test puts a file on the fake USB stick and removes it again.
+      - ./fake-usb:/fake-usb
     command: sh -c "npm install --no-audit --prefer-offline && node screenshot.mjs"
 
   shellcheck:

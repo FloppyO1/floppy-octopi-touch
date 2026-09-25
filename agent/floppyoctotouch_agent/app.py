@@ -12,6 +12,7 @@ from aiohttp import web
 from . import __version__
 from .config import Config
 from .display import Display, DisplayError
+from .files import FilesApi
 from .proxy import CLIENT_SESSION, OctoPrintProxy, WebcamProxy
 from .settings import SettingsStore
 
@@ -132,6 +133,7 @@ def create_app(config: Config) -> web.Application:
 
     OctoPrintProxy(config.octoprint_url, config.api_key).add_routes(app)
     WebcamProxy(config.webcam_url).add_routes(app)
+    FilesApi(config).add_routes(app)
 
     static = _static_handler(config.static_dir)
     app.router.add_get("/{tail:.*}", static)

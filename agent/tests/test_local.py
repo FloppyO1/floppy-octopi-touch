@@ -63,7 +63,7 @@ async def test_static_and_spa_fallback(make_client, tmp_path):
     assert (await client.get("/assets/missing.js")).status == 404
     assert (await client.get("/%2e%2e/secret.txt")).status == 404
     # Unknown agent endpoints must not be answered with the SPA page.
-    assert (await client.get("/local/usb")).status == 404
+    assert (await client.get("/local/nope")).status == 404
     assert (await client.get("/local")).status == 404
 
 

@@ -24,7 +24,7 @@ async def test_http_proxy_injects_api_key_and_strips_client_credentials(make_cli
 
 async def test_all_prefixes_are_proxied(make_client):
     client = await make_client()
-    for path in ("/api", "/plugin/appkeys/probe", "/downloads/files/local/a.gcode", "/sockjs/info"):
+    for path in ("/api", "/plugin/appkeys/probe", "/downloads/logs/octoprint.log", "/sockjs/info"):
         resp = await client.get(path)
         assert resp.status == 200, path
         assert (await resp.json())["path"] == path
