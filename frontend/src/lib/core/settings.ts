@@ -7,8 +7,10 @@
  */
 import { defaultCapabilityOverrides, type CapabilityOverrides } from './capabilities';
 import { SORT_KEYS, type SortDirection, type SortKey } from './files';
+import { MACRO_COLORS, MACRO_ICONS } from './macros';
+import { defaultTerminalFilters, type TerminalFilters } from './terminal';
 
-export const SETTINGS_VERSION = 5;
+export const SETTINGS_VERSION = 6;
 
 export type Language = 'en' | 'it';
 export const LANGUAGES: readonly Language[] = ['en', 'it'];
@@ -54,6 +56,14 @@ export type ChartWindow = (typeof CHART_WINDOWS)[number];
 export const JOG_STEPS = [0.1, 1, 10, 50] as const;
 export type JogStep = (typeof JOG_STEPS)[number];
 
+/** Babystep sizes (mm) of the Leveling screen. */
+export const BABYSTEPS = [0.01, 0.05] as const;
+export type Babystep = (typeof BABYSTEPS)[number];
+
+/** Z steps (mm) while adjusting a manual mesh point. */
+export const MESH_Z_STEPS = [0.025, 0.05, 0.1, 0.5] as const;
+export type MeshZStep = (typeof MESH_Z_STEPS)[number];
+
 export interface Settings {
   schemaVersion: number;
   language: Language;
@@ -74,6 +84,9 @@ export interface Settings {
   /** Jog distance (mm) and speeds (mm/min) of the Move screen. */
   move: { step: JogStep; xyFeedrate: number; zFeedrate: number };
   macros: Macro[];
+  terminal: { filters: TerminalFilters };
+  /** Paper test: distance of the corner points from the bed edges and travel height (mm). */
+  leveling: { inset: number; zHop: number; babystep: Babystep; meshStep: MeshZStep };
   printDone: { beep: boolean; beepGcode: string };
   /** Feed rates in mm/min, lengths in mm. */
   filament: {
@@ -105,6 +118,23 @@ export function defaultPresets(): TemperaturePreset[] {
   ];
 }
 
+/** Macros of a fresh install (also used by "restore defaults"). */
+export function defaultMacros(): Macro[] {
+  return [
+    { id: 'home', name: 'Home all', icon: 'home', color: 'accent', gcode: 'G28', confirm: false },
+    {
+      id: 'park',
+      name: 'Park head',
+      icon: 'park',
+      color: 'accent',
+      gcode: 'G91\nG1 Z10 F600\nG90\nG1 X0 Y200 F6000',
+      confirm: false,
+    },
+    { id: 'motors-off', name: 'Motors off', icon: 'motor', color: 'warn', gcode: 'M84', confirm: true },
+    { id: 'report', name: 'Report settings', icon: 'info', color: 'neutral', gcode: 'M503', confirm: false },
+  ];
+}
+
 export function defaultSettings(): Settings {
   return {
     schemaVersion: SETTINGS_VERSION,
@@ -120,19 +150,9 @@ export function defaultSettings(): Settings {
     },
     presets: defaultPresets(),
     move: { step: 10, xyFeedrate: 3000, zFeedrate: 300 },
-    macros: [
-      { id: 'home', name: 'Home all', icon: 'home', color: 'accent', gcode: 'G28', confirm: false },
-      {
-        id: 'park',
-        name: 'Park head',
-        icon: 'park',
-        color: 'accent',
-        gcode: 'G91\nG1 Z10 F600\nG90\nG1 X0 Y200 F6000',
-        confirm: false,
-      },
-      { id: 'motors-off', name: 'Motors off', icon: 'motor', color: 'warn', gcode: 'M84', confirm: true },
-      { id: 'report', name: 'Report settings', icon: 'info', color: 'neutral', gcode: 'M503', confirm: false },
-    ],
+    macros: defaultMacros(),
+    terminal: { filters: defaultTerminalFilters() },
+    leveling: { inset: 30, zHop: 5, babystep: 0.05, meshStep: 0.05 },
     printDone: { beep: true, beepGcode: 'M300 S880 P400' },
     filament: {
       extruderType: 'unknown',
@@ -167,6 +187,8 @@ const MIGRATIONS: Record<number, (doc: Doc) => Doc> = {
   3: (doc) => doc,
   // v5 (session 6): `temperature.chartMinutes`, `move` and `filament.minTemp` from the defaults.
   4: (doc) => doc,
+  // v6 (session 7): `terminal.filters` and `leveling` from the defaults.
+  5: (doc) => doc,
 };
 
 const isObject = (v: unknown): v is Doc => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -211,6 +233,8 @@ export function migrateSettings(raw: unknown): MigrationResult {
   if (!FILE_VIEWS.includes(settings.files.view)) settings.files.view = 'grid';
   if (!CHART_WINDOWS.includes(settings.temperature.chartMinutes)) settings.temperature.chartMinutes = 15;
   if (!JOG_STEPS.includes(settings.move.step)) settings.move.step = 10;
+  if (!BABYSTEPS.includes(settings.leveling.babystep)) settings.leveling.babystep = 0.05;
+  if (!MESH_Z_STEPS.includes(settings.leveling.meshStep)) settings.leveling.meshStep = 0.05;
   if (!['unknown', 'direct', 'bowden'].includes(settings.filament.extruderType)) {
     settings.filament.extruderType = 'unknown';
   }
@@ -222,7 +246,12 @@ export function migrateSettings(raw: unknown): MigrationResult {
   settings.macros = settings.macros.filter(
     (m) => isObject(m) && typeof m.id === 'string' && typeof m.name === 'string' &&
       typeof m.gcode === 'string',
-  );
+  ).map((m) => ({
+    ...m,
+    icon: (MACRO_ICONS as readonly string[]).includes(m.icon) ? m.icon : 'play',
+    color: (MACRO_COLORS as readonly string[]).includes(m.color) ? m.color : 'neutral',
+    confirm: m.confirm === true,
+  }));
   const overrides = settings.capabilities.overrides as Record<string, string>;
   for (const [key, value] of Object.entries(overrides)) {
     if (!['auto', 'on', 'off'].includes(value)) overrides[key] = 'auto';

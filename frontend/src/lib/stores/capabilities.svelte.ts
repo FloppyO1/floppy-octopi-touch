@@ -16,7 +16,11 @@ class CapabilityStore {
   private requested = false;
 
   resolved = $derived(resolveCapabilities(this.report.caps, settings.value.capabilities.overrides));
-  known = $derived(Object.keys(this.report.caps).length > 0);
+  /**
+   * A whole report was seen. `Cap:` lines without the `FIRMWARE_NAME` line that starts the report
+   * are the tail of one cut by the `history` window after a reload: ask for M115 again.
+   */
+  known = $derived(Object.keys(this.report.caps).length > 0 && this.report.firmwareName !== null);
 
   has(key: CapabilityKey): boolean {
     return this.resolved[key].enabled;

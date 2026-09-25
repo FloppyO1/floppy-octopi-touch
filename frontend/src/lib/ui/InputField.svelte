@@ -132,7 +132,8 @@
     font-size: var(--fs-lg);
   }
   .multiline .value {
-    padding: var(--sp-2) 0;
+    /* Margin, not padding: overflow is clipped at the padding edge, so a 4th line showed through it. */
+    margin: var(--sp-2) 0;
     white-space: pre-line;
     display: -webkit-box;
     -webkit-line-clamp: 3;

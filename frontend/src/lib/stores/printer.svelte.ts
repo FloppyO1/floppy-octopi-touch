@@ -2,6 +2,7 @@
 import { job as jobApi, printer as printerApi } from '../api/octoprint';
 import type { Axis, CurrentPayload, JobInfo, JobProgress, PrinterState } from '../api/types';
 import { DLP_SOCKET_PLUGIN, parseLayerInfo } from '../core/layer';
+import { homedAxes, isMotorsOff } from '../core/leveling';
 import type { HeadPosition } from '../core/move';
 import type { LocalActions } from '../core/notices';
 import { JOB_PHASES, printerPhase } from '../core/printerState';
@@ -20,6 +21,13 @@ class PrinterStore {
   busy = $derived(JOB_PHASES.includes(this.phase));
   sdReady = $derived(this.state?.flags.sdReady === true);
 
+  /**
+   * Axes homed since the connection, from the `G28` / `M84` lines sent by anyone (this screen,
+   * macros, G-code files, other clients). Moves to absolute XY positions need X and Y homed.
+   */
+  homedAxes = $state.raw<Record<Axis, boolean>>({ x: false, y: false, z: false });
+  homed = $derived(this.homedAxes.x && this.homedAxes.y && this.homedAxes.z);
+
   /** Head position from the last M114 answer (`PositionUpdate` event), `null` when unknown. */
   position = $state.raw<HeadPosition | null>(null);
   private positionTimer: ReturnType<typeof setTimeout> | null = null;
@@ -31,6 +39,24 @@ class PrinterStore {
     if (payload.busyFiles && !sameJson(payload.busyFiles, this.busyFiles)) {
       this.busyFiles = payload.busyFiles;
     }
+  }
+
+  /** Sent lines of the terminal log: `G28` homes, `M84`/`M18` loses the position. */
+  ingestLog(lines: readonly string[] | undefined): void {
+    if (!lines?.length) return;
+    let next = this.homedAxes;
+    for (const line of lines) {
+      if (!line.startsWith('Send:')) continue;
+      const axes = homedAxes(line);
+      if (axes) next = { ...next, ...Object.fromEntries(axes.map((a) => [a, true])) };
+      else if (isMotorsOff(line)) next = { x: false, y: false, z: false };
+    }
+    if (!sameJson(next, this.homedAxes)) this.homedAxes = next;
+  }
+
+  /** Printer disconnected: nothing is homed on the next connection. */
+  resetHoming(): void {
+    this.homedAxes = { x: false, y: false, z: false };
   }
 
   setPosition(position: HeadPosition | null): void {
@@ -69,6 +95,8 @@ class PrinterStore {
 
   home = async (axes: Axis[] = ['x', 'y', 'z']) => {
     await printerApi.home(axes);
+    // The `Send: G28` log line confirms it later; screens need it right away.
+    this.homedAxes = { ...this.homedAxes, ...Object.fromEntries(axes.map((a) => [a, true])) };
     // Queued after G28: answered once homing is done.
     if (this.position) this.position = { ...this.position, ...Object.fromEntries(axes.map((a) => [a, null])) };
     void this.requestPosition().catch(() => undefined);
@@ -93,6 +121,7 @@ class PrinterStore {
   motorsOff = async () => {
     await printerApi.command('M84');
     this.position = null;
+    this.resetHoming();
   };
 }
 

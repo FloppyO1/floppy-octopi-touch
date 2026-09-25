@@ -45,7 +45,10 @@ describe('capability store', () => {
     expect(capabilities.known).toBe(false);
     // Read before the report arrives: the derived state must still update afterwards.
     expect(capabilities.has('eeprom')).toBe(false);
-    capabilities.ingest(['Recv: Cap:EEPROM:1', 'Recv: Cap:PROMPT_SUPPORT:0']);
+    // The tail of a report (history cut after a reload) is not a whole report.
+    capabilities.ingest(['Recv: Cap:PROMPT_SUPPORT:0']);
+    expect(capabilities.known).toBe(false);
+    capabilities.ingest(['Recv: FIRMWARE_NAME:Marlin 2.1.2', 'Recv: Cap:EEPROM:1', 'Recv: Cap:PROMPT_SUPPORT:0']);
     expect(capabilities.known).toBe(true);
     expect(capabilities.has('eeprom')).toBe(true);
     expect(capabilities.has('promptSupport')).toBe(false);

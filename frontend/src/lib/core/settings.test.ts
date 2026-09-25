@@ -92,13 +92,32 @@ describe('migrateSettings', () => {
       filament: { extruderType: 'hybrid', bowdenLength: 420 },
     });
     expect(changed).toBe(true);
-    expect(settings.schemaVersion).toBe(5);
+    expect(settings.schemaVersion).toBe(SETTINGS_VERSION);
     expect(settings.temperature.confirmAbove).toEqual({ hotend: 240, bed: 85 });
     expect(settings.temperature.chartMinutes).toBe(15);
     expect(settings.move).toEqual({ step: 10, xyFeedrate: 4000, zFeedrate: 300 });
     expect(settings.filament.extruderType).toBe('unknown');
     expect(settings.filament.bowdenLength).toBe(420);
     expect(settings.filament.minTemp).toBe(170);
+  });
+
+  it('migrates v5 documents to v6: terminal filters, leveling, macro look repaired', () => {
+    const { settings, changed } = migrateSettings({
+      schemaVersion: 5,
+      terminal: { filters: { ok: true } },
+      leveling: { inset: 25, babystep: 0.3 },
+      macros: [
+        { id: 'a', name: 'Lights', icon: 'lamp', color: 'pink', gcode: 'M355 S1' },
+        { id: 'b', name: 'Broken' },
+      ],
+    });
+    expect(changed).toBe(true);
+    expect(settings.schemaVersion).toBe(6);
+    expect(settings.terminal.filters).toEqual({ temperature: true, ok: true, busy: true, sd: true, position: false });
+    expect(settings.leveling).toEqual({ inset: 25, zHop: 5, babystep: 0.05, meshStep: 0.05 });
+    expect(settings.macros).toEqual([
+      { id: 'a', name: 'Lights', icon: 'play', color: 'neutral', gcode: 'M355 S1', confirm: false },
+    ]);
   });
 
   it('keeps documents from a newer release without downgrading them', () => {

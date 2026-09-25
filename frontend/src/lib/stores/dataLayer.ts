@@ -15,6 +15,7 @@ import { connection } from './connection.svelte';
 import { events } from './events.svelte';
 import { files } from './files.svelte';
 import { notices } from './notices.svelte';
+import { leveling } from './leveling.svelte';
 import { job, printer } from './printer.svelte';
 import { prompt } from './prompt.svelte';
 import { server } from './server.svelte';
@@ -48,6 +49,8 @@ function handleEvent({ type, payload }: EventPayload): void {
     case 'Disconnected':
       capabilities.reset();
       prompt.reset();
+      leveling.reset();
+      printer.resetHoming();
       tune.reset();
       printer.setPosition(null);
       void connection.refresh();
@@ -83,6 +86,8 @@ function handleCurrent(current: CurrentPayload, isHistory: boolean): void {
   }
   // History lines are the recent past: good enough to know the fan/feed rate/flow after a reload.
   tune.ingest(current.logs);
+  printer.ingestLog(current.logs);
+  leveling.ingest(current.logs, !isHistory);
   capabilities.ingest(current.logs);
   if (printer.operational && !capabilities.known) void capabilities.requestIfUnknown();
 }

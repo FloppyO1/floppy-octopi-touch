@@ -5,6 +5,7 @@ export { startDataLayer, stopDataLayer } from './dataLayer';
 export { events } from './events.svelte';
 export { files } from './files.svelte';
 export { idle } from './idle.svelte';
+export { leveling } from './leveling.svelte';
 export { nav } from './nav.svelte';
 export { notices } from './notices.svelte';
 export { job, printer } from './printer.svelte';

@@ -410,9 +410,12 @@ async function printFlow(page) {
   await page.getByTestId('filament-locked').waitFor();
   if (!(await page.getByTestId('manual-extrude').isDisabled())) throw new Error('extrude enabled while printing');
   await page.screenshot({ path: `${OUT}/filament-locked.png` });
+  await page.getByTestId('nav-leveling').click();
+  await page.getByTestId('leveling-locked').waitFor();
+  if (!(await page.getByTestId('paper-home').isDisabled())) throw new Error('paper test enabled while printing');
   await page.getByTestId('nav-home').click();
   await page.getByTestId('job-pause').waitFor();
-  log('locks', 'Move and Filament locked while printing');
+  log('locks', 'Move, Filament and Leveling locked while printing');
 
   // The choice is persisted: switch only if the thumbnail is shown.
   if ((await page.getAttribute('[data-testid=preview]', 'data-mode')) !== 'webcam') {
@@ -588,7 +591,7 @@ async function moveScreen(page) {
   // would run as absolute moves there (real firmware is sequential).
   for (let i = 0; i < 5; i++) {
     await page.getByTestId('jog-xplus').click();
-    await page.waitForTimeout(1300);
+    await page.waitForTimeout(1800);
   }
   await page.waitForTimeout(2000); // the debounced M114 (after M400) must confirm it
   if ((await text(page, 'pos-x')).trim() !== '220.00') throw new Error(`x not clamped: ${await text(page, 'pos-x')}`);
@@ -657,6 +660,266 @@ async function filamentScreen(page) {
   await page.reload(); // the settings store would otherwise write its copy back later
 }
 
+const logHas = (page, text, timeout = 15_000) =>
+  page.waitForFunction((t) => document.querySelector('[data-testid=terminal-log]')?.textContent.includes(t), text, {
+    timeout,
+  });
+
+// Taps keys of the open on-screen keyboard (one key per character, ' ' = space).
+async function tapKeys(page, keys) {
+  const keyboard = page.getByTestId('keyboard');
+  for (const key of keys) {
+    if (key === ' ') await keyboard.getByRole('button', { name: 'space', exact: true }).click();
+    else await keyboard.getByRole('button', { name: key, exact: true }).click();
+  }
+}
+
+// Deep-merges `patch` into the stored settings behind the app's back (production build too): reload after.
+const patchSettings = (page, patch) =>
+  page.evaluate(async (patch) => {
+    const merge = (target, source) => {
+      for (const [key, value] of Object.entries(source)) {
+        if (value && typeof value === 'object' && !Array.isArray(value)) target[key] = merge(target[key] ?? {}, value);
+        else target[key] = value;
+      }
+      return target;
+    };
+    const doc = merge(await (await fetch('/local/settings')).json(), patch);
+    await fetch('/local/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(doc) });
+  }, patch);
+const setOverrides = (page, overrides) => patchSettings(page, { capabilities: { overrides } });
+
+// Lines the Virtual Printer sends back as if the firmware wrote them (`!!DEBUG:send`).
+const fakeFirmware = (page, lines) =>
+  api(page, 'POST', '/api/printer/command', { commands: lines.map((l) => `!!DEBUG:send ${l}`) });
+
+// Terminal: keyboard input, quick commands, filters, pause, history, clear.
+async function terminalScreen(page) {
+  await page.goto(`${BASE_URL}/#/terminal`);
+  await page.waitForSelector('[data-testid=terminal-log]');
+  await page.waitForSelector('[data-testid=connection-overlay]', { state: 'detached', timeout: 60_000 });
+  await page.getByTestId('terminal-input').click();
+  await page.waitForSelector('[data-testid=keyboard][data-layer=gcode]');
+  await tapKeys(page, 'M115');
+  await waitText(page, 'terminal-input', (t) => t.includes('M115'));
+  await page.screenshot({ path: `${OUT}/terminal-keyboard.png` });
+  await page.getByTestId('terminal-send').click();
+  await logHas(page, 'FIRMWARE_NAME');
+  await waitText(page, 'terminal-input', (t) => !t.includes('M115'));
+  await page.getByTestId('terminal-keyboard-toggle').click();
+  await page.getByTestId('quick-M114').click();
+  await logHas(page, ' Y:');
+  log('terminal', 'M115 typed on the G-code keyboard and answered, quick M114');
+
+  // Filters: hide the plain "ok" lines.
+  const okLines = () =>
+    page.$$eval('[data-testid=terminal-log] .line', (els) => els.filter((el) => el.textContent.trim() === 'ok').length);
+  if ((await okLines()) === 0) throw new Error('expected "ok" lines with the default filters');
+  await page.getByTestId('terminal-filters').click();
+  await page.getByTestId('filter-ok').getByRole('switch').click();
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: `${OUT}/terminal-filters.png` });
+  await closeModal(page, 'terminal-filter-dialog');
+  if ((await okLines()) !== 0) throw new Error('"ok" lines still shown with the filter on');
+  await waitText(page, 'terminal-filters', (t) => t.includes('4 hidden'));
+
+  // Pause: new lines are counted, not shown.
+  await page.getByTestId('terminal-pause').click();
+  await page.getByTestId('quick-M115').click();
+  await waitText(page, 'terminal-paused', (t) => !/ 0 new/.test(t));
+  await page.screenshot({ path: `${OUT}/terminal-paused.png` });
+  await page.getByTestId('terminal-pause').click();
+  await page.waitForSelector('[data-testid=terminal-paused]', { state: 'detached' });
+
+  // History: pick the typed command again and send it with the physical Enter key.
+  await page.getByTestId('terminal-history').click();
+  await page.getByTestId('terminal-history-list').getByRole('button', { name: 'M115', exact: true }).click();
+  await waitText(page, 'terminal-input', (t) => t.includes('M115'));
+  await page.keyboard.press('Enter');
+  await waitText(page, 'terminal-input', (t) => !t.includes('M115'));
+  await page.getByTestId('terminal-keyboard-toggle').click();
+  await page.waitForTimeout(1200);
+  await page.screenshot({ path: `${OUT}/terminal.png` });
+
+  await page.getByTestId('terminal-filters').click();
+  await page.getByTestId('filter-ok').getByRole('switch').click();
+  await closeModal(page, 'terminal-filter-dialog');
+  await page.getByTestId('terminal-clear').click();
+  await page.waitForSelector('[data-testid=terminal-log] .empty', { timeout: 5000 }).catch(() => undefined);
+  log('terminal', 'filter, pause with counter, history, clear');
+}
+
+// Macros: run (with and without confirmation), add with the keyboards, reorder, delete, restore.
+async function macrosScreen(page) {
+  await page.goto(`${BASE_URL}/#/terminal`);
+  await page.getByTestId('terminal-tab-macros').click();
+  await page.waitForSelector('[data-testid=macro-grid]');
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: `${OUT}/macros.png` });
+  await page.getByTestId('macro-report').click();
+  await page.getByText('Report settings sent').waitFor();
+  await page.getByTestId('macro-motors-off').click();
+  await page.waitForSelector('[data-testid=confirm-dialog]');
+  await page.getByTestId('confirm-dialog').getByRole('button', { name: 'Run', exact: true }).click();
+  await page.getByText('Motors off sent').waitFor();
+  log('macros', 'M503 run at once, M84 after the confirmation');
+
+  await page.getByTestId('macros-manage').click();
+  await page.getByTestId('macro-add').click();
+  await page.getByTestId('macro-name').click();
+  await page.waitForSelector('[data-testid=text-input]');
+  await page.keyboard.type('Beep');
+  await page.keyboard.press('Enter');
+  await page.waitForSelector('[data-testid=text-input]', { state: 'detached' });
+  await page.getByTestId('macro-gcode').click();
+  await page.waitForSelector('[data-testid=keyboard][data-layer=gcode]');
+  await tapKeys(page, 'M300 S440 P200');
+  await page.keyboard.press('Enter'); // multiline: a new line
+  await page.keyboard.type('M117 Beep ; comment');
+  await page.getByTestId('text-input-ok').click();
+  await page.waitForSelector('[data-testid=text-input]', { state: 'detached' });
+  await page.getByTestId('macro-icon-bell').click();
+  await page.getByTestId('macro-color-ok').click();
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: `${OUT}/macro-editor.png` });
+  await page.getByTestId('macro-save').click();
+  await page.waitForSelector('[data-testid=macro-editor]', { state: 'detached' });
+  const rows = () =>
+    page.$$eval('[data-testid^=macro-row-]', (els) => els.map((el) => el.querySelector('.name').textContent));
+  const beepId = await page.$eval('[data-testid^=macro-row-]:last-child', (el) => el.dataset.testid.slice('macro-row-'.length));
+  await page.getByTestId(`macro-up-${beepId}`).click();
+  if ((await rows()).join() !== 'Home all,Park head,Motors off,Beep,Report settings') throw new Error(`macro order: ${await rows()}`);
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: `${OUT}/macro-manager.png` });
+  await closeModal(page, 'macro-manager');
+
+  await page.getByTestId(`macro-${beepId}`).click();
+  await page.getByText('Beep sent').waitFor();
+  await page.getByTestId('terminal-tab-console').click();
+  await logHas(page, 'M117 Beep');
+  if (await page.$eval('[data-testid=terminal-log]', (el) => el.textContent.includes('comment'))) {
+    throw new Error('the macro comment was sent');
+  }
+  await page.getByTestId('terminal-tab-macros').click();
+
+  await page.getByTestId('macros-manage').click();
+  await page.getByTestId(`macro-delete-${beepId}`).click();
+  await page.getByTestId('confirm-dialog').getByRole('button', { name: 'Delete', exact: true }).click();
+  await page.waitForSelector('[data-testid=confirm-dialog]', { state: 'detached' });
+  await page.getByTestId('macro-down-home').click();
+  await page.getByTestId('macro-restore').click();
+  await page.getByTestId('confirm-dialog').getByRole('button', { name: 'Restore defaults', exact: true }).click();
+  await page.waitForSelector('[data-testid=confirm-dialog]', { state: 'detached' });
+  if ((await rows()).join() !== 'Home all,Park head,Motors off,Report settings') throw new Error(`restored macros: ${await rows()}`);
+  await closeModal(page, 'macro-manager');
+  await page.getByTestId('terminal-tab-console').click();
+  log('macro CRUD', 'Beep added (keyboard, icon, colour), moved, run without its comment, deleted; restored');
+}
+
+// Marlin 2.1 `G29 S0` / `M420 V` output of a 3x3 manual mesh, sent back by the Virtual Printer.
+const MBL_REPORT = [
+  'Mesh Bed Leveling ON',
+  '3x3 mesh. Z offset: 0.00000',
+  'Measured points:',
+  '        0        1        2',
+  ' 0 +0.12500 +0.05000 -0.01250',
+  ' 1 +0.08750 +0.00000 -0.05000',
+  ' 2 +0.02500 -0.03750 -0.09000',
+  'echo:Bed Leveling ON',
+];
+
+// Leveling: paper test (home, points, lift), mesh report → heatmap, manual mesh, babystep, probe offset, M500.
+async function levelingScreen(page) {
+  const TOOLS = ['manualMesh', 'autolevel', 'zProbe', 'babystepping'];
+  const overrideTools = (value) => setOverrides(page, Object.fromEntries(TOOLS.map((k) => [k, value])));
+  await page.goto(`${BASE_URL}/#/leveling`);
+  await overrideTools('auto'); // in case an earlier run stopped half-way
+  await page.reload();
+  await page.waitForSelector('[data-testid=paper-bed]');
+  await page.waitForSelector('[data-testid=connection-overlay]', { state: 'detached', timeout: 60_000 });
+  // Motors off (from any client): nothing is homed any more.
+  await api(page, 'POST', '/api/printer/command', { commands: ['M84', 'M851 Z0.2'] });
+  await page.waitForSelector('[data-testid=paper-not-homed]');
+  await waitDisabled(page, 'point-front-left');
+  await page.getByTestId('paper-home').click();
+  await waitDisabled(page, 'paper-next', false);
+  await page.getByTestId('paper-next').click();
+  await waitText(page, 'paper-position', (t) => t.includes('Front left') && t.includes('Z 0.00'));
+  await page.waitForTimeout(1500);
+  await page.getByTestId('paper-next').click();
+  await waitText(page, 'paper-position', (t) => t.includes('Front right'));
+  await page.waitForTimeout(1500);
+  await page.getByTestId('point-center').click();
+  await waitText(page, 'paper-position', (t) => t.includes('Centre') && t.includes('Z 0.00'));
+  await page.waitForTimeout(800);
+  await page.screenshot({ path: `${OUT}/leveling-paper.png` });
+  await page.getByTestId('paper-finish').click();
+  await waitText(page, 'paper-position', (t) => t.includes('Z 5.00'));
+  log('paper test', 'homed, front-left → front-right → centre at Z0, lifted to 5 mm');
+
+  await page.getByTestId('leveling-tab-mesh').click();
+  await page.waitForSelector('[data-testid=mesh-no-tools]');
+  await page.screenshot({ path: `${OUT}/leveling-mesh-none.png` });
+  // Pretend the firmware has manual mesh, a probe and babystepping (the Virtual Printer has none).
+  await overrideTools('on');
+  await page.reload();
+  await page.getByTestId('leveling-tab-mesh').click();
+  await page.getByTestId('mesh-read').click();
+  await fakeFirmware(page, MBL_REPORT);
+  await page.waitForSelector('[data-testid=mesh-map]');
+  await waitText(page, 'mesh-range', (t) => t.includes('0.215'));
+  await waitText(page, 'mesh-meta', (t) => t.includes('compensation on'));
+  const cell = await text(page, 'mesh-cell-0-0');
+  if (cell.trim() !== '+0.125') throw new Error(`front-left mesh cell: ${cell}`);
+  await page.waitForSelector('[data-testid=toast]', { state: 'detached', timeout: 10_000 });
+  await page.screenshot({ path: `${OUT}/leveling-mesh.png` });
+  log('mesh', 'MBL report parsed: 3x3, range 0.215 mm');
+
+  await page.getByTestId('mbl-start').click();
+  await page.getByTestId('confirm-dialog').getByRole('button', { name: 'Start manual mesh', exact: true }).click();
+  await waitText(page, 'mbl-point', (t) => t.includes('Point 1 of 9'));
+  await page.getByTestId('mbl-down').click();
+  await page.getByTestId('mbl-next').click();
+  await waitText(page, 'mbl-point', (t) => t.includes('Point 2 of 9'));
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: `${OUT}/leveling-mbl.png` });
+  await fakeFirmware(page, ['Mesh probing done.']);
+  await page.waitForSelector('[data-testid=mbl-start]', { timeout: 15_000 });
+  if (DEV) await terminalHas(page, 'Send: M420 V');
+  log('manual mesh', 'G29 S1, Z jog, G29 S2; "Mesh probing done." ends it and reads the mesh');
+
+  await page.getByTestId('leveling-tab-z').click();
+  await waitText(page, 'probe-offset', (t) => t.includes('+0.20'));
+  await page.getByTestId('babystep-step-0.05').click();
+  await page.getByTestId('babystep-up').click();
+  await waitText(page, 'babystep-total', (t) => t.includes('+0.05'));
+  await page.getByTestId('babystep-step-0.01').click();
+  await page.getByTestId('babystep-down').click();
+  await waitText(page, 'babystep-total', (t) => t.includes('+0.04'));
+  if (DEV) await terminalHas(page, 'M290 Z-0.01');
+  await page.getByTestId('probe-set').click();
+  await page.waitForSelector('[data-testid=numpad]');
+  // Positive: the Virtual Printer ignores negative M851 values (its parameter regex has no sign).
+  for (const key of ['0', 'Decimal point', '3', '5']) {
+    await page.getByTestId('numpad').getByRole('button', { name: key, exact: true }).click();
+  }
+  await page.getByTestId('numpad-ok').click();
+  await page.waitForSelector('[data-testid=numpad]', { state: 'detached' });
+  await waitText(page, 'probe-offset', (t) => t.includes('+0.35'));
+  await page.getByTestId('z-save').click();
+  await page.getByTestId('confirm-dialog').getByRole('button', { name: 'Save to EEPROM', exact: true }).click();
+  await page.getByText('Settings saved to EEPROM').waitFor();
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: `${OUT}/leveling-z.png` });
+  log('z offset', 'babystep +0.05 −0.01, M851 Z0.35 read back, M500');
+
+  // Back to the Virtual Printer's own capabilities and defaults.
+  await api(page, 'POST', '/api/printer/command', { commands: ['M851 Z0.2', 'M500'] });
+  await overrideTools('auto');
+  await patchSettings(page, { leveling: { babystep: 0.05 } });
+  await page.reload();
+}
+
 async function kiosk(page) {
   await page.goto(`${BASE_URL}/?kiosk=1#/home`);
   await page.waitForSelector('[data-testid=gauge-hotend]');
@@ -687,16 +950,26 @@ try {
     // 404s are expected: files without a thumbnail, the agent fallback for them.
     if (msg.type() === 'error' && !msg.text().includes('404')) console.error('[browser]', msg.text());
   });
-  if (DEV) await debugPage(page);
-  await shell(page);
-  await filesScreen(page);
-  await temperatureScreen(page);
-  await moveScreen(page);
-  await filamentScreen(page);
-  await printFlow(page);
-  if (DEV) await screensaver(page);
-  await kiosk(page);
-  if (DEV) await gallery(page);
+  // ONLY=terminal,leveling runs just those steps (quick checks while developing a screen).
+  const only = process.env.ONLY?.split(',');
+  const steps = [
+    ['debug', debugPage, DEV],
+    ['shell', shell, true],
+    ['files', filesScreen, true],
+    ['temperature', temperatureScreen, true],
+    ['move', moveScreen, true],
+    ['filament', filamentScreen, true],
+    ['terminal', terminalScreen, true],
+    ['macros', macrosScreen, true],
+    ['leveling', levelingScreen, true],
+    ['print', printFlow, true],
+    ['screensaver', screensaver, DEV],
+    ['kiosk', kiosk, true],
+    ['gallery', gallery, DEV],
+  ];
+  for (const [name, step, enabled] of steps) {
+    if (enabled && (!only || only.includes(name))) await step(page);
+  }
 
   const preview = await browser.newPage({ viewport: { width: 1280, height: 800 } });
   await preview.goto(`${BASE_URL}/preview.html`);
