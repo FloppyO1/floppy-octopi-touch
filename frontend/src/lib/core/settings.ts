@@ -12,6 +12,10 @@ export const SETTINGS_VERSION = 2;
 export type Language = 'en' | 'it';
 export const LANGUAGES: readonly Language[] = ['en', 'it'];
 
+/** Accent colour variants (tokens in ui/tokens.css). */
+export const ACCENTS = ['teal', 'amber', 'indigo'] as const;
+export type Accent = (typeof ACCENTS)[number];
+
 export interface TemperaturePreset {
   id: string;
   name: string;
@@ -37,6 +41,7 @@ export interface Settings {
   schemaVersion: number;
   language: Language;
   clock24h: boolean;
+  accent: Accent;
   screensaver: { enabled: boolean; timeoutMin: number };
   /** HDMI output off when idle (never while printing). */
   screenOff: { enabled: boolean; timeoutMin: number };
@@ -69,6 +74,7 @@ export function defaultSettings(): Settings {
     schemaVersion: SETTINGS_VERSION,
     language: 'en',
     clock24h: true,
+    accent: 'teal',
     screensaver: { enabled: true, timeoutMin: 5 },
     screenOff: { enabled: false, timeoutMin: 30 },
     temperature: {
@@ -154,6 +160,7 @@ export function migrateSettings(raw: unknown): MigrationResult {
 
   const settings = mergeOver(defaultSettings(), doc);
   if (!LANGUAGES.includes(settings.language)) settings.language = 'en';
+  if (!ACCENTS.includes(settings.accent)) settings.accent = 'teal';
   // Array items are user data: drop malformed ones instead of failing later in the UI.
   settings.presets = settings.presets.filter(
     (p) => isObject(p) && typeof p.id === 'string' && typeof p.name === 'string' &&

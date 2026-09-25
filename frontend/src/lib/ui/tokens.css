@@ -52,7 +52,7 @@
   --paused-soft: rgb(245 197 66 / 0.16);
   --error-soft: rgb(255 92 108 / 0.16);
 
-  /* ---- accent (default: teal; overridden below) */
+  /* ---- accent (default: teal; the [data-accent] blocks below also work on any element) */
   --accent: #2dd4bf;
   --accent-strong: #5eead4;
   --accent-soft: rgb(45 212 191 / 0.16);
@@ -109,7 +109,7 @@
   --z-connection: 600;
 }
 
-:root[data-accent='amber'] {
+[data-accent='amber'] {
   --accent: #ffb020;
   --accent-strong: #ffc555;
   --accent-soft: rgb(255 176 32 / 0.16);
@@ -119,14 +119,14 @@
   --heating-soft: rgb(255 106 61 / 0.16);
 }
 
-:root[data-accent='teal'] {
+[data-accent='teal'] {
   --accent: #2dd4bf;
   --accent-strong: #5eead4;
   --accent-soft: rgb(45 212 191 / 0.16);
   --on-accent: #032320;
 }
 
-:root[data-accent='indigo'] {
+[data-accent='indigo'] {
   --accent: #818cf8;
   --accent-strong: #a5b4fc;
   --accent-soft: rgb(129 140 248 / 0.18);

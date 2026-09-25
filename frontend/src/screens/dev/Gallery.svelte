@@ -33,7 +33,7 @@
   import Slider from '../../lib/ui/Slider.svelte';
   import Spinner from '../../lib/ui/Spinner.svelte';
   import Stepper from '../../lib/ui/Stepper.svelte';
-  import { ACCENTS, applyAccent, DEFAULT_ACCENT, isAccent, type Accent } from '../../lib/ui/theme';
+  import { ACCENTS, DEFAULT_ACCENT, isAccent, type Accent } from '../../lib/ui/theme';
   import { toast } from '../../lib/ui/toast.svelte';
   import Toggle from '../../lib/ui/Toggle.svelte';
 
@@ -42,7 +42,8 @@
 
   const initialAccent = document.documentElement.dataset.accent;
   let accent = $state<Accent>(isAccent(initialAccent) ? initialAccent : DEFAULT_ACCENT);
-  $effect(() => applyAccent(accent));
+  // Demo only: switches the tokens without touching the saved setting.
+  $effect(() => void (document.documentElement.dataset.accent = accent));
 
   // Demo values
   let hotend = $state(187);

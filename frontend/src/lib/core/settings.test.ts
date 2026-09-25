@@ -44,6 +44,7 @@ describe('migrateSettings', () => {
     const { settings } = migrateSettings({
       schemaVersion: 2,
       language: 'fr',
+      accent: 'pink',
       screensaver: { enabled: 'yes', timeoutMin: 10 },
       temperature: { max: { hotend: '300' } },
       presets: [{ id: 'x', name: 'X', hotend: 190, bed: 50, fan: null }, { name: 'broken' }, null],
@@ -51,6 +52,7 @@ describe('migrateSettings', () => {
       capabilities: { overrides: { eeprom: 'maybe', autolevel: 'on' } },
     });
     expect(settings.language).toBe('en');
+    expect(settings.accent).toBe('teal');
     expect(settings.screensaver).toEqual({ enabled: true, timeoutMin: 10 });
     expect(settings.temperature.max).toEqual({ hotend: 275, bed: 110 });
     expect(settings.presets).toEqual([{ id: 'x', name: 'X', hotend: 190, bed: 50, fan: null }]);

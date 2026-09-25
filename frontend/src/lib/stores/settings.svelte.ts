@@ -1,7 +1,8 @@
 /** Dashboard settings synchronised with the agent (`/local/settings`). */
 import { getAgentSettings, putAgentSettings } from '../api/agent';
-import { defaultSettings, migrateSettings, type Language, type Settings } from '../core/settings';
+import { defaultSettings, migrateSettings, type Accent, type Language, type Settings } from '../core/settings';
 import { setLocale } from '../i18n/index.svelte';
+import { applyAccent } from '../ui/theme';
 
 export type SyncStatus = 'loading' | 'ready' | 'saving' | 'error';
 
@@ -19,6 +20,7 @@ class SettingsStore {
       const { settings, changed } = migrateSettings(await getAgentSettings());
       this.value = settings;
       setLocale(settings.language);
+      applyAccent(settings.accent);
       this.status = 'ready';
       this.error = null;
       if (changed) await this.flush();
@@ -38,6 +40,11 @@ class SettingsStore {
   setLanguage(language: Language): void {
     setLocale(language);
     this.update((s) => (s.language = language));
+  }
+
+  setAccent(accent: Accent): void {
+    applyAccent(accent);
+    this.update((s) => (s.accent = accent));
   }
 
   /** Writes pending changes now. */

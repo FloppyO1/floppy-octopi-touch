@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { TemperatureSample } from '../api/types';
 import { capabilities } from './capabilities.svelte';
 import { events } from './events.svelte';
+import { screenFromHash } from './nav.svelte';
 import { prompt } from './prompt.svelte';
 import { settings } from './settings.svelte';
 import { temperatures } from './temperatures.svelte';
@@ -97,5 +98,15 @@ describe('event store', () => {
     events.emit('PrintDone', { name: 'again.gcode' });
     expect(got).toEqual(['PrintDone:cube.gcode']);
     expect(events.recent[0].type).toBe('PrintDone');
+  });
+});
+
+describe('navigation', () => {
+  it('reads the screen from the URL hash', () => {
+    expect(screenFromHash('#/files')).toBe('files');
+    expect(screenFromHash('#system')).toBe('system');
+    expect(screenFromHash('#/move/extra?x=1')).toBe('move');
+    expect(screenFromHash('')).toBe('home');
+    expect(screenFromHash('#/nope')).toBe('home');
   });
 });

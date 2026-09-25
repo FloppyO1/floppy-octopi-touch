@@ -1,8 +1,9 @@
 <script lang="ts">
-  // Temporary System screen (session 3): language and version until the real screen (session 8).
+  // Temporary System screen (session 3): language, accent colour and version until the real screen (session 8).
   import Info from '@lucide/svelte/icons/info';
   import Languages from '@lucide/svelte/icons/languages';
-  import { LANGUAGES } from '../lib/core/settings';
+  import Palette from '@lucide/svelte/icons/palette';
+  import { ACCENTS, LANGUAGES } from '../lib/core/settings';
   import { i18n, t } from '../lib/i18n/index.svelte';
   import { connection, settings } from '../lib/stores';
   import Button from '../lib/ui/Button.svelte';
@@ -27,6 +28,22 @@
     </div>
   </Card>
 
+  <Card title={t('system.accent')} icon={Palette} class="wide">
+    <div class="row" role="group" aria-label={t('system.accent')}>
+      {#each ACCENTS as accent (accent)}
+        <Button
+          size="lg"
+          selected={settings.value.accent === accent}
+          onclick={() => settings.setAccent(accent)}
+          data-testid="accent-{accent}"
+        >
+          <span class="swatch" data-accent={accent}></span>
+          {t(`accent.${accent}`)}
+        </Button>
+      {/each}
+    </div>
+  </Card>
+
   <Card title={t('system.about')} icon={Info}>
     <dl>
       <dt>FloppyOctoTouch</dt>
@@ -44,6 +61,7 @@
   .system {
     display: grid;
     grid-template-columns: 1fr 1fr;
+    grid-auto-flow: row dense;
     align-content: start;
     gap: var(--sp-3);
     height: 100%;
@@ -68,6 +86,21 @@
   dd {
     margin: 0;
     font-weight: var(--fw-medium);
+  }
+  .system :global(.wide) {
+    grid-column: 1 / -1;
+  }
+  .swatch {
+    flex: none;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--accent);
+  }
+  .row :global(.label) {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
   }
   .note {
     margin: 0;
