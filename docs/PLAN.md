@@ -575,7 +575,7 @@ _Legenda: `[ ]` da fare · `[~]` in corso (interrotta se la trovi a inizio sessi
 - [x] Sessione 9 — Installazione sul Raspberry (2026-09-25, v0.9.0; interrotta una volta e ripresa lo stesso giorno)
 - [x] Sessione 9b — Installazione in un solo comando (2026-09-27, v0.9.1)
 - [~] Sessione 10 — Test reale e rifinitura (iniziata 2026-09-27; segnata `[~]` il 2026-09-25 senza lavoro fatto, rimessa `[ ]` per fare prima la 9b)
-- [ ] Sessione 11 — Rimozione di oggetti dalla stampa in corso (aggiunta il 2026-09-27, v1.1.0)
+- [~] Sessione 11 — Rimozione di oggetti dalla stampa in corso (aggiunta il 2026-09-27, v1.1.0; iniziata 2026-09-27 sul branch `session-11`)
 
 ### Note tra sessioni
 _(ogni sessione aggiunge qui decisioni prese, deviazioni dal piano, problemi aperti)_
