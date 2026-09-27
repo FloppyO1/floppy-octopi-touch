@@ -30,7 +30,7 @@ Procedura:
      se la sessione si allunga, spezzarla in 10a / 10b.
    - In qualsiasi sessione: quando serve una decisione che il piano non copre.
 6. Chiusura: checklist della sezione 3, con **versione = 0.N.0** e tag `v0.N.0` per la Sessione N
-   (eccezione: Sessione 10 → `1.0.0` / `v1.0.0`). Marcare la riga come `[x]` con la data, aggiungere le note
+   (eccezioni: Sessione 9b → `0.9.1` / `v0.9.1`; Sessione 10 → `1.0.0` / `v1.0.0`). Marcare la riga come `[x]` con la data, aggiungere le note
    in "Note tra sessioni".
 7. **Fermarsi.** Non iniziare la sessione successiva: l'utente riavvierà con lo stesso prompt in una nuova sessione.
 
@@ -405,10 +405,55 @@ Leggi docs/PLAN.md e CLAUDE.md. Esegui la Sessione 9:
 - Chiusura sessione (sezione 3) con versione e tag v0.9.0 locale, poi FERMATI.
 ```
 
+### Sessione 9b — Installazione in un solo comando
+Obiettivo: sul Pi bastano `git clone …` + `cd FloppyOctoTouch` + `./deploy/install.sh`. Niente `chmod`, niente `sudo`
+da ricordare. L'unico input manuale è l'**API key**, creata dall'utente in OctoPrint e incollata quando l'installer la
+chiede (decisione dell'utente: niente generazione automatica, niente credenziali OctoPrint nell'installer). Tutte le
+domande sono **all'inizio** (key + poche conferme con Invio), poi l'installer lavora da solo fino al riavvio.
+```
+Leggi docs/PLAN.md e CLAUDE.md. Esegui la Sessione 9b:
+- Auto-elevazione: se install.sh (e update.sh / uninstall.sh) non gira come root, si rilancia con
+  `exec sudo -- bash <script> <argomenti>` (helper in lib/common.sh; errore chiaro se sudo manca). Funziona anche
+  `bash deploy/install.sh` se il bit eseguibile si è perso (copia da Windows/zip). Verificare che `install.sh` resti
+  100755 nel repo e nel tarball.
+- API key inserita a mano (resta il flusso attuale, rifinito):
+  - la chiede come PRIMA domanda, subito dopo i controlli preliminari, con istruzioni chiare e l'indirizzo reale del
+    Pi: "apri http://<ip>/ da un PC → Impostazioni (chiave inglese) → Application Keys → nome 'FloppyOctoTouch' →
+    Generate → copia e incolla qui";
+  - input nascosto, spazi/a capo rimossi, formato controllato e validazione su `/api/version`; se OctoPrint la
+    rifiuta la richiede (senza limite di tentativi, Ctrl+C per uscire); se OctoPrint non risponde avvisa e la salva
+    senza verifica; Invio a vuoto = inserirla dopo dal touch (con avviso), come oggi;
+  - `--api-key=` resta (per i test e per chi la vuole passare da riga di comando);
+  - reinstallazione con key salvata ancora valida: tenuta senza chiedere (si cambia con `--api-key=` o dal touch).
+- Resto automatico, domande tutte all'inizio prima di apt (che dura minuti): utente chiesto SOLO se non rilevato da
+  octoprint.service (altrimenti solo mostrato), key, display (Invio = sì), "riavvia alla fine" (Invio = sì se servono
+  le impostazioni del display). Poi niente più domande: alla fine riepilogo e riavvio automatico con conto alla
+  rovescia di 10 s annullabile con Ctrl+C (se si annulla, il kiosk parte subito come oggi).
+- git: controllare se OctoPi 1.1.0 ha già git; README con `sudo apt install -y git` solo se manca. L'URL del clone
+  resta un segnaposto finché la repo non è pubblicata (git solo locale): in alternativa copiare la cartella sul Pi.
+- Test nel deploy-test: auto-elevazione da utente non root con sudo, `bash deploy/install.sh` senza bit eseguibile,
+  ordine delle domande (nessuna domanda dopo l'inizio di apt: prompt pilotati da un tty finto, es. `script`),
+  key rifiutata e poi accettata, key vuota, reinstallazione che tiene la key senza chiedere, utente rilevato non
+  chiesto. shellcheck pulito; rigenerare il tarball in release/ prima del deploy-test.
+- README, sezione "Installation on the Raspberry Pi": è la guida che l'utente segue sul Pi, quindi deve essere
+  **semplice e lineare**, leggibile da chi non conosce il progetto. In cima una guida rapida di pochi passi numerati:
+  1. prerequisiti in una riga (Pi 4 con OctoPi 1.1.0 e OctoPrint già configurato, schermo collegato);
+  2. crea la API key in OctoPrint (percorso esatto dei menu, con cosa scrivere e cosa copiare);
+  3. i comandi da copiare così come sono (ssh, eventuale `apt install git`, `git clone`, `cd`, `./deploy/install.sh`);
+  4. cosa chiede l'installer (la key da incollare + le conferme con Invio) e cosa succede dopo (riavvio → dashboard
+     sullo schermo).
+  Solo dopo, in sottosezioni separate: installazione da tarball senza git, opzioni avanzate (flag), aggiornamento,
+  disinstallazione, troubleshooting. Niente dettagli interni (unit, sudoers, udev…) nella guida rapida: vanno in
+  `docs/ARCHITECTURE.md` o in una sottosezione "What the installer does" in fondo.
+- CHANGELOG; CLAUDE.md (stato attuale).
+- Chiusura sessione (sezione 3) con versione e tag v0.9.1 locale, poi FERMATI.
+```
+
 ### Sessione 10 — Test sul Raspberry reale e rifinitura
 ```
 Leggi docs/PLAN.md e CLAUDE.md. Esegui la Sessione 10 (io ho il Raspberry davanti e ti riporto l'esito):
-- Guidami nell'installazione sul Pi e nella checklist hardware: boot → kiosk automatico, touch preciso, risoluzione
+- Guidami nell'installazione sul Pi (flusso della Sessione 9b: key creata in OctoPrint, clone +
+  ./deploy/install.sh) e nella checklist hardware: boot → kiosk automatico, touch preciso, risoluzione
   corretta, funzionamento senza WiFi, riconnessione se OctoPrint si riavvia, stampante spenta/accesa, webcam USB UVC,
   chiavetta USB (inserimento, import, espulsione), SD della stampante, beep M300 dal buzzer dell'LCD, host prompt
   (M876, se il firmware ha PROMPT_SUPPORT), spegnimento HDMI e risveglio al tocco, prestazioni (CPU/RAM Chromium),
@@ -455,7 +500,8 @@ _Legenda: `[ ]` da fare · `[~]` in corso (interrotta se la trovi a inizio sessi
 - [x] Sessione 7 — Terminale, Macro, Livellamento/Mesh (2026-09-25, v0.7.0)
 - [x] Sessione 8 — Sistema e Impostazioni (2026-09-25, v0.8.0)
 - [x] Sessione 9 — Installazione sul Raspberry (2026-09-25, v0.9.0; interrotta una volta e ripresa lo stesso giorno)
-- [~] Sessione 10 — Test reale e rifinitura (iniziata 2026-09-25)
+- [~] Sessione 9b — Installazione in un solo comando (aggiunta 2026-09-27, iniziata 2026-09-27)
+- [ ] Sessione 10 — Test reale e rifinitura (segnata `[~]` il 2026-09-25 senza lavoro fatto, rimessa `[ ]` per fare prima la 9b)
 
 ### Note tra sessioni
 _(ogni sessione aggiunge qui decisioni prese, deviazioni dal piano, problemi aperti)_

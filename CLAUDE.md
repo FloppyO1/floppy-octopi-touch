@@ -198,6 +198,7 @@ v0.9.0 (session 9): Pi installer (`deploy/install.sh`, idempotent; from a clone 
 `release/`), agent + kiosk systemd units (cage + Chromium on tty1 via a PAM/logind session), read-only USB automount
 (udev + `systemd-mount` on `/media/usb-<label>`), sudo rule for eject/kiosk restart, optional display lines in
 `config.txt`/`cmdline.txt`, `floppyoctotouch-update`/`-uninstall`, release build and a bookworm installer test.
-Not yet run on a real Pi. Before: every screen (sessions 3-8, System/settings in 8). Next: session 10 (real Pi
+Not yet run on a real Pi. Before: every screen (sessions 3-8, System/settings in 8). Next: session 9b (one-command
+install: self-elevation, API key pasted by hand as the first question, everything else automatic), then session 10 (real Pi
 checklist and polish).
 See `docs/PLAN.md` for details and notes between sessions.
