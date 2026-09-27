@@ -66,7 +66,12 @@ async def test_display_none_backend_only_remembers_the_state(make_client):
     assert (await (await client.get("/local/display")).json())["on"] is True
     resp = await client.put("/local/display", json={"on": False})
     assert resp.status == 200
-    assert await resp.json() == {"on": False, "backend": "none", "output": "HDMI-A-1"}
+    assert await resp.json() == {
+        "on": False,
+        "backend": "none",
+        "output": "HDMI-A-1",
+        "mode": "1024x600@60Hz",
+    }
     assert (await (await client.get("/local/display")).json())["on"] is False
     assert (await client.put("/local/display", json={"on": "yes"})).status == 400
     assert (await client.put("/local/display", data="nope")).status == 400
@@ -140,3 +145,109 @@ async def test_display_missing_wlr_randr(make_client, monkeypatch):
 def test_unknown_display_backend_is_rejected():
     with pytest.raises(ValueError):
         display_module.Display("xrandr", "HDMI-1")
+
+
+WLR_RANDR = """HDMI-A-1 "Mediatrix Peripherals Inc MPI7002 0x00000001 (HDMI-A-1)"
+  Physical size: 180x130 mm
+  Enabled: yes
+  Modes:
+    800x450 px, 60.049000 Hz
+    1280x720 px, 59.939999 Hz
+    1280x720 px, 60.000000 Hz
+    1920x1080 px, 60.000000 Hz (preferred, current)
+  Position: 0,0
+HDMI-A-2 "Other"
+  Modes:
+    640x480 px, 60.000000 Hz
+"""
+
+
+def test_parse_modes_of_one_output():
+    modes, current = display_module.parse_modes(WLR_RANDR, "HDMI-A-1")
+    assert modes == ["800x450@60Hz", "1280x720@60Hz", "1920x1080@60Hz"]
+    assert current == "1920x1080@60Hz"
+    assert display_module.parse_modes(WLR_RANDR, "HDMI-A-2") == (["640x480@60Hz"], None)
+
+
+def test_valid_modes():
+    for mode in ("preferred", "1024x600@60Hz", "1024x600", "1280x720@59.94Hz"):
+        assert display_module.valid_mode(mode)
+    for mode in ("", "1024x600@", "big", "1024x600@60Hz --off", "99999x1@60Hz"):
+        assert not display_module.valid_mode(mode)
+
+
+async def test_display_mode_is_kept_and_saved(make_client, tmp_path):
+    client = await make_client(display_backend="none", display_mode="preferred")
+    body = await (await client.get("/local/display/modes")).json()
+    assert body["mode"] == "preferred"
+    assert "1024x600@60Hz" in body["modes"]
+    resp = await client.put("/local/display/mode", json={"mode": "1280x720@60Hz"})
+    assert resp.status == 200
+    body = await resp.json()
+    assert (body["current"], body["pending"], body["mode"]) == (
+        "1280x720@60Hz",
+        "1280x720@60Hz",
+        "preferred",
+    )
+    assert (await client.post("/local/display/mode/keep")).status == 200
+    body = await (await client.get("/local/display/modes")).json()
+    assert (body["mode"], body["pending"]) == ("1280x720@60Hz", None)
+    assert '"display_mode": "1280x720@60Hz"' in (tmp_path / "config.json").read_text()
+    assert (await client.post("/local/display/mode/keep")).status == 409
+
+
+async def test_display_mode_goes_back_when_not_confirmed(make_client, monkeypatch):
+    monkeypatch.setattr(display_module, "REVERT_S", 0.05)
+    client = await make_client(display_backend="none")
+    await client.put("/local/display/mode", json={"mode": "1920x1080@60Hz"})
+    await asyncio.sleep(0.2)
+    body = await (await client.get("/local/display/modes")).json()
+    assert (body["current"], body["pending"], body["mode"]) == (
+        "1024x600@60Hz",
+        None,
+        "1024x600@60Hz",
+    )
+    assert (await client.post("/local/display/mode/keep")).status == 409
+
+
+async def test_display_mode_revert_and_bad_requests(make_client):
+    client = await make_client(display_backend="none")
+    await client.put("/local/display/mode", json={"mode": "preferred"})
+    assert (await (await client.get("/local/display/modes")).json())["current"] == "1920x1080@60Hz"
+    assert (await client.post("/local/display/mode/revert")).status == 200
+    assert (await (await client.get("/local/display/modes")).json())["current"] == "1024x600@60Hz"
+    assert (
+        await client.put("/local/display/mode", json={"mode": "1024x600; reboot"})
+    ).status == 400
+    assert (await client.put("/local/display/mode", data="nope")).status == 400
+
+
+async def test_display_mode_locked_by_the_environment(make_client):
+    client = await make_client(display_backend="none", env_overrides={"display_mode"})
+    assert (await (await client.get("/local/display/modes")).json())["locked"] is True
+    assert (await client.put("/local/display/mode", json={"mode": "preferred"})).status == 409
+
+
+async def test_display_mode_wlr_randr_commands(make_client, monkeypatch):
+    calls = []
+
+    class Listing(FakeProcess):
+        async def communicate(self):
+            return WLR_RANDR.encode(), b""
+
+    async def fake_exec(*args, **kwargs):
+        calls.append(args)
+        return Listing(0)
+
+    monkeypatch.setattr(display_module.asyncio, "create_subprocess_exec", fake_exec)
+    client = await make_client()
+    assert (await client.post("/local/display/mode/apply")).status == 200
+    body = await (await client.put("/local/display/mode", json={"mode": "preferred"})).json()
+    assert body["current"] == "1920x1080@60Hz"
+    assert (await client.post("/local/display/mode/revert")).status == 200
+    assert calls == [
+        ("wlr-randr", "--output", "HDMI-A-1", "--custom-mode", "1024x600@60Hz"),
+        ("wlr-randr", "--output", "HDMI-A-1", "--preferred"),
+        ("wlr-randr",),
+        ("wlr-randr", "--output", "HDMI-A-1", "--custom-mode", "1024x600@60Hz"),
+    ]

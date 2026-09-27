@@ -4,14 +4,17 @@
 set -u
 
 url=${FOT_KIOSK_URL:-http://127.0.0.1:8765/?kiosk=1}
-health_url=${FOT_AGENT_HEALTH_URL:-http://127.0.0.1:8765/local/health}
+agent_url=${FOT_AGENT_URL:-http://127.0.0.1:8765}
+health_url=$agent_url/local/health
 
 log() { printf 'floppyoctotouch-kiosk: %s\n' "$*" >&2; }
 
 # The 7" screen only advertises 16:9 modes up to 1920x1080 (its scaler shrinks them), not its own 1024x600,
-# and cage picks the preferred one: ask cage for 1024x600. FOT_DISPLAY_MODE=preferred keeps the screen's mode.
-display_mode=${FOT_DISPLAY_MODE:-1024x600@60Hz}
-if [ "$display_mode" != preferred ]; then
+# and cage picks the preferred one. The agent sets the mode chosen in System > Settings (1024x600 by default);
+# this is the fallback when it cannot. FOT_DISPLAY_MODE=preferred keeps the screen's mode.
+set_mode_directly() {
+  local display_mode=${FOT_DISPLAY_MODE:-1024x600@60Hz} output
+  [ "$display_mode" != preferred ] || return 0
   output=${FOT_DISPLAY_OUTPUT:-$(wlr-randr 2>/dev/null | awk '/^[^ ]/ { print $1; exit }')}
   if [ -z "$output" ]; then
     log "no output found by wlr-randr: keeping the screen's mode"
@@ -20,7 +23,7 @@ if [ "$display_mode" != preferred ]; then
   else
     log "cannot set $output to $display_mode (see FOT_DISPLAY_MODE in /etc/floppyoctotouch/kiosk.env)"
   fi
-fi
+}
 
 # The agent starts in a few seconds; until then the screen stays black (no browser error page).
 tries=0
@@ -31,6 +34,12 @@ until curl -fsS -o /dev/null --max-time 2 "$health_url" 2>/dev/null; do
   tries=$((tries + 1))
   sleep 1
 done
+
+if curl -fsS -o /dev/null --max-time 15 -X POST "$agent_url/local/display/mode/apply" 2>/dev/null; then
+  log "screen mode set by the agent"
+else
+  set_mode_directly
+fi
 
 browser=''
 for candidate in chromium chromium-browser; do

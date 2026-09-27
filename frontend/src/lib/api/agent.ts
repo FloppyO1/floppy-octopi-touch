@@ -9,6 +9,24 @@ export const putAgentSettings = <T>(settings: T) => putJson<T>('/local/settings'
 export const setDisplayPower = (on: boolean) => putJson<{ on: boolean }>('/local/display', { on });
 export const getDisplayState = () => getJson<{ on: boolean }>('/local/display');
 
+/** Output modes (`1024x600@60Hz`, or `preferred` = the screen's own choice). */
+export interface DisplayModes {
+  /** Saved mode, set at every kiosk start. */
+  mode: string;
+  current: string | null;
+  modes: string[];
+  /** FOT_DISPLAY_MODE in kiosk.env wins: the setting cannot be changed here. */
+  locked: boolean;
+  /** Mode being tried, reverted by the agent after `revertSeconds` unless kept. */
+  pending: string | null;
+  revertSeconds: number;
+}
+export const getDisplayModes = () => getJson<DisplayModes>('/local/display/modes');
+export const tryDisplayMode = (mode: string) => putJson<DisplayModes>('/local/display/mode', { mode });
+/** 409 when the agent already went back to the previous mode. */
+export const keepDisplayMode = () => postJson<unknown>('/local/display/mode/keep', {});
+export const revertDisplayMode = () => postJson<unknown>('/local/display/mode/revert', {});
+
 /** CPU, memory, disk and network of the Pi. */
 export const getSystemInfo = () => getJson<SystemInfo>('/local/system');
 export const getApiKeyState = () => getJson<ApiKeyState>('/local/apikey');

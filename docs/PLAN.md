@@ -1134,4 +1134,11 @@ _(ogni sessione aggiunge qui decisioni prese, deviazioni dal piano, problemi ape
   schermo); connessione iniziale a OctoPrint percepita lenta (da misurare); eventuale adattamento dell'app a
   risoluzioni diverse da 1024×600 come paracadute.
 - Deciso con l'utente: nuova **Sessione 11** (rimozione oggetti, v1.1.0), vedi sezione 4.
+- Aggiunta su richiesta dell'utente: **risoluzione dello schermo in Sistema → Impostazioni → Schermo** (Select con
+  1024×600 consigliata, modalità annunciate dallo schermo, "predefinita dello schermo"). L'agent la applica subito e la
+  ripristina da solo dopo 15 s se non viene confermata (una modalità che lo schermo non mostra non resta mai), la salva
+  in `config.json` (`display_mode`) e la riapplica alla riaccensione dello schermo; `kiosk.sh` chiede all'agent
+  (`POST /local/display/mode/apply`) di impostarla all'avvio e ripiega su `wlr-randr` diretto se l'agent non risponde.
+  `FOT_DISPLAY_MODE` in kiosk.env vince e blocca l'impostazione. Endpoint `/local/display/modes`, `…/mode` (PUT),
+  `…/mode/keep|revert|apply`. 78 pytest, smoke test (passo system) con prova/ripristino/conferma.
 - Errore di processo: un `python3 --version` lanciato per sbaglio sul PC host (nessun effetto); da non ripetere.

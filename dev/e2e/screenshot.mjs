@@ -1046,13 +1046,37 @@ async function systemScreen(page) {
   await page.getByTestId('saver-timeout').click();
   await numpadEnter(page, '5');
 
+  // Screen resolution: tried at once, "Go back" restores it, "Keep" saves it in the agent config.
+  const modes = () => page.evaluate(async () => (await fetch('/local/display/modes')).json());
+  const pickMode = async (label) => {
+    await page.waitForSelector('[data-testid=confirm-dialog]', { state: 'detached' });
+    await page.getByTestId('display-mode').click();
+    await page.getByRole('option', { name: label }).click();
+    await page.waitForSelector('[data-testid=confirm-dialog]');
+  };
+  await pickMode('1280 × 720 · 60 Hz');
+  if ((await modes()).current !== '1280x720@60Hz') throw new Error('resolution not tried');
+  await page.waitForTimeout(400); // dialog transitions
+  await page.screenshot({ path: `${OUT}/settings-resolution-keep.png` });
+  await page.getByRole('button', { name: 'Go back' }).click();
+  await page.getByText('Previous resolution restored').waitFor();
+  if ((await modes()).current !== '1024x600@60Hz') throw new Error('resolution not restored');
+  await pickMode('1280 × 720 · 60 Hz');
+  await confirmWith(page, 'Keep');
+  await page.getByText('Resolution saved').waitFor();
+  if ((await modes()).mode !== '1280x720@60Hz') throw new Error('resolution not saved');
+  await pickMode('1024 × 600 · 60 Hz (recommended)');
+  await confirmWith(page, 'Keep');
+  await page.waitForFunction(async () => (await (await fetch('/local/display/modes')).json()).mode === '1024x600@60Hz');
+  await page.screenshot({ path: `${OUT}/settings-resolution.png` });
+
   await page.getByTestId('settings-firmware').click();
   await waitText(page, 'firmware-name', (t) => t.startsWith('Marlin'));
   await page.getByTestId('cap-manualMesh-on').click();
   await page.waitForTimeout(700);
   if ((await stored()).capabilities.overrides.manualMesh !== 'on') throw new Error('capability override not saved');
   await page.getByTestId('cap-manualMesh-auto').click();
-  log('settings', '7 sections, screensaver 12 min saved, manual mesh forced on and back to auto');
+  log('settings', '7 sections, screensaver 12 min saved, resolution tried/reverted/kept, manual mesh on and back to auto');
 
   // API key: a wrong key is refused by OctoPrint, the right one is saved and the page reconnects.
   await page.getByTestId('settings-connection').click();

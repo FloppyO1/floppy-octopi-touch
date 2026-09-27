@@ -10,9 +10,9 @@ import aiohttp
 from aiohttp import web
 
 from . import __version__
-from .config import Config
+from .config import Config, save_config_values
 from .control import ControlApi
-from .display import Display, DisplayError
+from .display import Display, DisplayError, valid_mode
 from .files import FilesApi
 from .proxy import CLIENT_SESSION, OctoPrintProxy, WebcamProxy
 from .settings import SettingsStore
@@ -99,6 +99,82 @@ async def put_display(request: web.Request) -> web.Response:
     return web.json_response(display.state())
 
 
+def _display_failed(exc: DisplayError) -> web.Response:
+    log.warning("display: %s", exc)
+    return web.json_response({"error": "display_failed", "detail": str(exc)}, status=503)
+
+
+async def get_display_modes(request: web.Request) -> web.Response:
+    try:
+        return web.json_response(await request.app[DISPLAY].modes())
+    except DisplayError as exc:
+        return _display_failed(exc)
+
+
+async def put_display_mode(request: web.Request) -> web.Response:
+    """``{"mode": "1024x600@60Hz" | "preferred"}``: applied now, reverted unless kept in time."""
+    try:
+        data = await request.json()
+    except ValueError:
+        raise web.HTTPBadRequest(text="invalid JSON") from None
+    mode = data.get("mode") if isinstance(data, dict) else None
+    if not isinstance(mode, str) or not valid_mode(mode):
+        raise web.HTTPBadRequest(
+            text='expected {"mode": "<width>x<height>@<rate>Hz" | "preferred"}'
+        )
+    display = request.app[DISPLAY]
+    if display.mode_locked:
+        return web.json_response(
+            {"error": "locked", "detail": "set by FOT_DISPLAY_MODE in kiosk.env"}, status=409
+        )
+    try:
+        await display.try_mode(mode)
+        return web.json_response(await display.modes())
+    except DisplayError as exc:
+        return _display_failed(exc)
+
+
+async def keep_display_mode(request: web.Request) -> web.Response:
+    display = request.app[DISPLAY]
+    if not await display.keep_mode():
+        return web.json_response({"error": "not_pending", "detail": "already reverted"}, status=409)
+    return web.json_response(display.state())
+
+
+async def revert_display_mode(request: web.Request) -> web.Response:
+    await request.app[DISPLAY].revert_mode()
+    return web.json_response(request.app[DISPLAY].state())
+
+
+async def apply_display_mode(request: web.Request) -> web.Response:
+    """Called by the kiosk at start: sets the configured mode (the screen may prefer another)."""
+    display = request.app[DISPLAY]
+    try:
+        await display.apply_configured()
+    except DisplayError as exc:
+        return _display_failed(exc)
+    return web.json_response(display.state())
+
+
+def _make_display(config: Config) -> Display:
+    def save_mode(mode: str) -> None:
+        save_config_values(config.config_path, {"display_mode": mode})
+        config.display_mode = mode
+
+    return Display(
+        config.display_backend,
+        config.display_output,
+        config.display_mode,
+        save_mode=save_mode,
+        mode_locked="display_mode" in config.env_overrides,
+    )
+
+
+async def _close_display(app: web.Application) -> AsyncIterator[None]:
+    yield
+    await app[DISPLAY].close()
+
+
 def _static_handler(static_dir: Path):
     root = static_dir.resolve()
 
@@ -123,14 +199,20 @@ def create_app(config: Config) -> web.Application:
     app = web.Application(client_max_size=1024**3)
     app[CONFIG] = config
     app[SETTINGS] = SettingsStore(config.data_dir / "settings.json")
-    app[DISPLAY] = Display(config.display_backend, config.display_output, config.display_mode)
+    app[DISPLAY] = _make_display(config)
     app.cleanup_ctx.append(_client_session)
+    app.cleanup_ctx.append(_close_display)
 
     app.router.add_get("/local/health", health)
     app.router.add_get("/local/settings", get_settings)
     app.router.add_put("/local/settings", put_settings)
     app.router.add_get("/local/display", get_display)
     app.router.add_put("/local/display", put_display)
+    app.router.add_get("/local/display/modes", get_display_modes)
+    app.router.add_put("/local/display/mode", put_display_mode)
+    app.router.add_post("/local/display/mode/keep", keep_display_mode)
+    app.router.add_post("/local/display/mode/revert", revert_display_mode)
+    app.router.add_post("/local/display/mode/apply", apply_display_mode)
 
     OctoPrintProxy(config.octoprint_url, lambda: config.api_key).add_routes(app)
     WebcamProxy(config.webcam_url).add_routes(app)
