@@ -689,14 +689,19 @@ async function moveScreen(page) {
   await page.getByTestId('jog-zminus').click();
   await page.getByText('Z is already at the edge of the build volume').waitFor();
   await page.getByTestId('jog-step-50').click();
-  // One at a time: the Virtual Printer applies G91/G90 at once but buffers the moves, so quick jogs
-  // would run as absolute moves there (real firmware is sequential).
-  for (let i = 0; i < 5; i++) {
-    await page.getByTestId('jog-xplus').click();
-    await page.waitForTimeout(1800);
-  }
-  await page.waitForTimeout(2000); // the debounced M114 (after M400) must confirm it
-  if ((await text(page, 'pos-x')).trim() !== '220.00') throw new Error(`x not clamped: ${await text(page, 'pos-x')}`);
+  // The Virtual Printer reads G90/G91 when its buffer thread runs a move, not when the move arrives, so the
+  // G90 that follows every jog sometimes turns it into an absolute move (real firmware is sequential).
+  // Start from a known X near the edge instead of chaining 50 mm jogs, and check the clamped jog at once.
+  await api(page, 'POST', '/api/printer/command', { commands: ['G92 X200'] });
+  await page.getByTestId('read-position').click();
+  await waitText(page, 'pos-x', (t) => t.trim() === '200.00');
+  await page.getByTestId('jog-xplus').click();
+  await waitText(page, 'pos-x', (t) => t.trim() === '220.00', 1000);
+  if (DEV) await terminalHas(page, 'G0 X20 F');
+  await page.waitForTimeout(1500);
+  await api(page, 'POST', '/api/printer/command', { commands: ['G92 X220'] });
+  await page.getByTestId('read-position').click();
+  await waitText(page, 'pos-x', (t) => t.trim() === '220.00');
   await page.getByTestId('jog-yplus').click();
   await waitText(page, 'pos-y', (t) => t.trim() === '50.00');
   await page.waitForTimeout(600);

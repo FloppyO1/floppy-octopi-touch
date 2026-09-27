@@ -172,10 +172,11 @@ dev/deploy-test/               installer test on Debian bookworm (run.sh, fake_o
 - The agent reads thumbnails straight from OctoPrint's uploads (`FOT_UPLOADS_DIR`, volume mounted `:ro`); the
   disk cache is keyed by path + size + mtime, so a re-uploaded file gets a fresh thumbnail.
 
-- Virtual Printer and moves: it applies `G90`/`G91` at once but buffers `G0`/`G1`, so a jog sent while earlier moves
-  are still queued can run as an absolute move there; it also answers `M114` immediately (hence `M400` before
-  every `M114` in the app). Real Marlin is sequential. In Playwright, leave ~1.8 s between 50 mm jogs (1.3 s was
-  flaky on the agent build).
+- Virtual Printer and moves: it applies `G90`/`G91` at once but buffers `G0`/`G1`, and reads the relative flag only
+  when its buffer thread runs the move: the `G90` that OctoPrint sends right after every jog sometimes turns that
+  jog into an absolute move, whatever the pause between jogs. It also answers `M114` immediately (hence `M400`
+  before every `M114` in the app). Real Marlin is sequential. In Playwright, only jog from 0 or set a known position
+  with `G92` + `read-position` first (see the move step).
 - OctoPrint fires `PositionUpdate` (x, y, z, e, t, f, reason) for every M114 answer: the filament wizard uses
   `M400` + `M114` to know when its moves are done.
 - A Card's `{#snippet actions()}` shadows a script variable called `actions` inside the Card: name it otherwise.
