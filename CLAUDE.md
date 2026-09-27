@@ -232,8 +232,8 @@ Chromium on tty1 via a PAM/logind session), read-only USB automount (udev + `sys
 sudo rule for eject/kiosk restart, optional display lines in `config.txt`/`cmdline.txt`,
 `floppyoctotouch-update`/`-uninstall`, release build and a bookworm installer test (100 checks). Not yet run on a real
 Pi. Before: every screen (sessions 3-8). Session 10 (real Pi checklist and polish) in progress on `main`.
-Branch `session-11` (cancel objects: agent `/local/objects`, Home "Objects" dialog, M486 or the Cancel Objects plugin,
+Session 11 (cancel objects, merged into `main` on 2026-09-27: agent `/local/objects`, Home "Objects" dialog, M486 or the Cancel Objects plugin,
 installer question; installer test 127 checks): code and docs done, waiting for the test on the Pi with the printer;
-merged into `main` after v1.0.0, then released as v1.1.0.
+version bump and tags (v1.0.0, then v1.1.0) when sessions 10 and 11 close.
 Repository: `https://github.com/FloppyO1/floppy-octopi-touch` (README clone commands, About screen).
 See `docs/PLAN.md` for details and notes between sessions.

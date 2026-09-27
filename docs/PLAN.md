@@ -1219,3 +1219,7 @@ _(ogni sessione aggiunge qui decisioni prese, deviazioni dal piano, problemi ape
   - **Resta**: verifica sul Pi con la stampante (stop intermedio: stampa di 3-4 oggetti piccoli, annullarne uno;
     il file va caricato **dopo** l'installazione del plugin), poi dopo la chiusura della 10 (v1.0.0 su `main`):
     merge del branch, bump a 1.1.0, tarball, tag `v1.1.0`.
+- **Merge in `main` (2026-09-27, su richiesta dell'utente)**: `main` era già tutto contenuto nel branch, quindi
+  fast-forward di `main` a `session-11` (nessuna modifica di `main` persa). Cambia la decisione precedente: niente
+  più merge dopo la 1.0.0; le sessioni 10 e 11 proseguono entrambe su `main` e alla chiusura si fanno bump e tag
+  (v1.0.0 per la 10, poi v1.1.0 per la 11). Il branch `session-11` resta locale (si può cancellare).
