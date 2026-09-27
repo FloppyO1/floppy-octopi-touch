@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import asyncio
 
+import aiohttp
 import pytest
 from aiohttp import web
 
 from floppyoctotouch_agent import display as display_module
+from floppyoctotouch_agent import proxy as proxy_module
 
 
 def fake_streamer() -> web.Application:
@@ -17,9 +19,11 @@ def fake_streamer() -> web.Application:
                 headers={"Content-Type": "multipart/x-mixed-replace; boundary=frame"}
             )
             await resp.prepare(request)
-            for i in range(1000):
+            for i in range(int(request.query.get("frames", "1000"))):
                 await resp.write(b"--frame\r\nContent-Type: image/jpeg\r\n\r\nFRAME%d\r\n" % i)
                 await asyncio.sleep(0.01)
+            if request.query.get("then") == "stall":
+                await asyncio.sleep(30)
             return resp
         return web.json_response(
             {"path": request.raw_path, "apiKey": request.headers.get("X-Api-Key")}
@@ -52,6 +56,23 @@ async def test_webcam_stream_is_relayed_and_can_be_closed(make_client, streamer)
     chunk = await resp.content.readuntil(b"FRAME1")
     assert b"FRAME0" in chunk
     resp.close()
+
+
+async def test_ended_webcam_stream_is_cut_not_completed(make_client, streamer):
+    # A cleanly ended MJPEG body would leave the last frame on screen with no event in Chromium.
+    client = await make_client(webcam_url=str(streamer.make_url("")))
+    resp = await client.get("/webcam/?action=stream&frames=3")
+    with pytest.raises(aiohttp.ClientPayloadError):
+        await resp.read()
+
+
+async def test_stalled_webcam_stream_is_cut(make_client, streamer, monkeypatch):
+    monkeypatch.setattr(proxy_module, "WEBCAM_STALL_S", 0.3)
+    client = await make_client(webcam_url=str(streamer.make_url("")))
+    resp = await client.get("/webcam/?action=stream&frames=3&then=stall")
+    assert b"FRAME2" in await resp.content.readuntil(b"FRAME2")
+    with pytest.raises(aiohttp.ClientPayloadError):
+        await asyncio.wait_for(resp.read(), 5)
 
 
 async def test_webcam_unreachable_returns_502(make_client):

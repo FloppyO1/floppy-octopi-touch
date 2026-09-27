@@ -34,11 +34,20 @@ _DROP_REQUEST = _HOP_BY_HOP | {"host", "x-api-key", "authorization", "origin", "
 _DROP_RESPONSE = _HOP_BY_HOP | {"content-length"}
 
 CLIENT_SESSION = web.AppKey("client_session", aiohttp.ClientSession)
+WEBCAM_STALL_S = 10.0
+
+
+def _cut(request: web.Request) -> None:
+    """Closes the browser connection without ending the chunked body: the reply is incomplete."""
+    if request.transport is not None:
+        request.transport.close()
 
 
 class OctoPrintProxy:
     name = "OctoPrint"
     unreachable = "octoprint_unreachable"
+    # Longest silence of the upstream while a reply is read; None = no limit (long OctoPrint calls).
+    read_timeout_s: float | None = None
 
     def __init__(self, upstream: str, api_key: Callable[[], str]) -> None:
         # A callable: the key can be replaced at runtime (System → API key).
@@ -62,6 +71,11 @@ class OctoPrintProxy:
     async def _handle_http(self, request: web.Request) -> web.StreamResponse:
         session = request.app[CLIENT_SESSION]
         body = request.content if request.body_exists else None
+        extra = {}
+        if self.read_timeout_s is not None:
+            extra["timeout"] = aiohttp.ClientTimeout(
+                total=None, sock_connect=5, sock_read=self.read_timeout_s
+            )
         try:
             async with session.request(
                 request.method,
@@ -69,6 +83,7 @@ class OctoPrintProxy:
                 headers=self._upstream_headers(request),
                 data=body,
                 allow_redirects=False,
+                **extra,
             ) as upstream:
                 headers = {
                     k: v for k, v in upstream.headers.items() if k.lower() not in _DROP_RESPONSE
@@ -77,13 +92,26 @@ class OctoPrintProxy:
                 if upstream.content_length is not None:
                     response.content_length = upstream.content_length
                 await response.prepare(request)
+                endless = upstream.content_type.startswith("multipart/x-mixed-replace")
                 try:
                     async for chunk in upstream.content.iter_chunked(64 * 1024):
                         await response.write(chunk)
-                    await response.write_eof()
+                    if endless:
+                        # After a clean end Chromium keeps showing the last frame and fires no
+                        # event: a cut connection breaks the image, the page notices and reconnects.
+                        log.warning("%s stream ended by %s", self.name, request.path)
+                        _cut(request)
+                    else:
+                        await response.write_eof()
                 except ConnectionResetError:
                     # The browser went away (e.g. an endless MJPEG stream was closed).
                     pass
+                except (aiohttp.ClientError, TimeoutError) as exc:
+                    # Upstream failed or stalled halfway: never end the body as if it were complete.
+                    log.warning(
+                        "%s failed during %s: %s", self.name, request.path, exc or "timeout"
+                    )
+                    _cut(request)
                 return response
         except aiohttp.ClientConnectionError as exc:
             log.warning(
@@ -151,6 +179,9 @@ class WebcamProxy(OctoPrintProxy):
 
     def __init__(self, upstream: str) -> None:
         super().__init__(upstream, lambda: "")
+        # A streamer that stops sending frames (camera unplugged, USB hiccup) but keeps the
+        # connection open would freeze the image: cut it after this long without data.
+        self.read_timeout_s = WEBCAM_STALL_S
 
     def target(self, request: web.Request) -> URL:
         rest = request.raw_path.removeprefix("/webcam").lstrip("/")

@@ -5,7 +5,7 @@ import { idleMode, type IdleInput } from './idle';
 import { parseLayerInfo } from './layer';
 import { clearsNotice, LOCAL_ACTION_WINDOW_MS, noticeForEvent } from './notices';
 import { applyTuneLines, createTuneState, fanPercent, fanValue } from './tune';
-import { resolveWebcam, webcamTransform } from './webcam';
+import { resolveWebcam, STREAM_START_TIMEOUT_MS, streamHealth, webcamTransform } from './webcam';
 
 describe('tune overrides from the terminal log', () => {
   it('tracks fan, feed rate and flow from sent commands (file lines included)', () => {
@@ -112,6 +112,17 @@ describe('webcam source', () => {
     expect(resolveWebcam(null)).toBeNull();
     expect(resolveWebcam(null, '/webcam/?action=stream')?.stream).toBe('/webcam/?action=stream');
     expect(webcamTransform({ flipH: false, flipV: true, rotate90: true })).toBe('rotate(-90deg) scaleY(-1)');
+  });
+});
+
+describe('webcam stream health', () => {
+  it('is fine while playing or still starting', () => {
+    expect(streamHealth({ loaded: true, naturalWidth: 640, sinceMs: 60_000 })).toBe('ok');
+    expect(streamHealth({ loaded: false, naturalWidth: 0, sinceMs: 2000 })).toBe('ok');
+  });
+  it('notices a broken stream and a first frame that never comes', () => {
+    expect(streamHealth({ loaded: true, naturalWidth: 0, sinceMs: 5000 })).toBe('lost');
+    expect(streamHealth({ loaded: false, naturalWidth: 0, sinceMs: STREAM_START_TIMEOUT_MS + 1 })).toBe('stuck');
   });
 });
 

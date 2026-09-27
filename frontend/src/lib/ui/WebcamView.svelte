@@ -3,7 +3,7 @@
   // component is mounted and `active`: the screensaver and hidden screens must not keep it open.
   import VideoOff from '@lucide/svelte/icons/video-off';
   import { onDestroy } from 'svelte';
-  import { webcamTransform, type WebcamSource } from '../core/webcam';
+  import { streamHealth, webcamTransform, type WebcamSource } from '../core/webcam';
   import { t } from '../i18n/index.svelte';
 
   interface Props {
@@ -17,6 +17,7 @@
   let { source, active = true, fit = 'cover', testid }: Props = $props();
 
   const RETRY_MS = 10_000;
+  const CHECK_MS = 2000;
   let failed = $state(false);
   let attempt = $state(0);
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -26,6 +27,25 @@
     if (attempt === 0) return source.stream;
     // Retry: a new URL makes the browser open a new connection.
     return `${source.stream}${source.stream.includes('?') ? '&' : '?'}retry=${attempt}`;
+  });
+
+  // Once an MJPEG stream has started Chromium reports nothing, even when it ends or stalls: without
+  // this check a restarted or stuck streamer leaves a frozen frame forever (see streamHealth).
+  let img = $state<HTMLImageElement | null>(null);
+  let loaded = false;
+  $effect(() => {
+    if (!url) return;
+    loaded = false;
+    const since = performance.now();
+    const check = setInterval(() => {
+      if (!img) return;
+      const health = streamHealth({ loaded, naturalWidth: img.naturalWidth, sinceMs: performance.now() - since });
+      // A broken stream reconnects at once (a restarted streamer is usually back); if it is still
+      // down, the error path waits RETRY_MS.
+      if (health === 'lost') attempt++;
+      else if (health === 'stuck') onerror();
+    }, CHECK_MS);
+    return () => clearInterval(check);
   });
 
   function onerror() {
@@ -49,6 +69,8 @@
       alt={t('webcam.title')}
       style:transform={webcamTransform(source)}
       style:object-fit={fit}
+      bind:this={img}
+      onload={() => (loaded = true)}
       {onerror}
       data-testid="webcam-stream"
     />

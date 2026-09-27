@@ -61,3 +61,19 @@ export function webcamTransform(source: Pick<WebcamSource, 'flipH' | 'flipV' | '
   if (source.flipV) parts.push('scaleY(-1)');
   return parts.join(' ') || 'none';
 }
+
+/** Longest wait for the first frame before the stream counts as failed. */
+export const STREAM_START_TIMEOUT_MS = 15_000;
+
+export type StreamHealth = 'ok' | 'lost' | 'stuck';
+
+/**
+ * Health of an MJPEG stream shown in an `<img>`. Chromium fires `load` at the first frame and then
+ * nothing at all, whether the stream ends, breaks or stalls: only a broken connection shows, as
+ * `naturalWidth` back to 0. The agent cuts ended and stalled streams (webcam proxy) so they show too.
+ * `lost` = it was playing and broke; `stuck` = no first frame in time.
+ */
+export function streamHealth(input: { loaded: boolean; naturalWidth: number; sinceMs: number }): StreamHealth {
+  if (input.loaded) return input.naturalWidth === 0 ? 'lost' : 'ok';
+  return input.sinceMs > STREAM_START_TIMEOUT_MS ? 'stuck' : 'ok';
+}
