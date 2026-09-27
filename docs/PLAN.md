@@ -196,6 +196,15 @@ FloppyOctoTouch/
 ---
 
 ## 3. Convenzioni per tutte le sessioni
+- ⚠️ **REGOLA IMPORTANTISSIMA — niente dati personali nel repo** (il repo è pubblico su GitHub). Mai scrivere in
+  codice, commenti, test, fixture, commit, tag, `docs/PLAN.md`, `CLAUDE.md`, README, CHANGELOG, screenshot o tarball
+  dati dell'installazione reale dell'utente: nome utente del Pi, hostname, indirizzi IP/MAC, SSID o password WiFi,
+  API key, numeri di serie, email, percorsi del PC Windows, output di terminale incollato così com'è. Si usano segnaposto
+  generici (`pi`, `octopi.local`, `192.168.1.x`, la key di dev). Anche le "Note tra sessioni" descrivono i problemi in
+  modo generico (es. "utente rinominato in Imager", non il nome). Screenshot dal Pi vero: controllare che non mostrino
+  IP, SSID o altro (la schermata Sistema li mostra) prima di committarli. **Prima di ogni commit** controllare
+  `git diff --cached` per questi dati. Unica eccezione: l'identità del progetto già decisa (autore "Filippo Castellan"
+  in LICENSE/About/package, identità git `FloppyO1`, URL della repo).
 - Leggere `docs/PLAN.md` e `CLAUDE.md` prima di iniziare.
 - **Una sessione alla volta**: a fine sessione Claude **si ferma** e aspetta il via dell'utente per la successiva. Mai iniziare la sessione dopo in autonomia.
 - **Chiusura di ogni sessione** (checklist obbligatoria):
@@ -502,7 +511,7 @@ _Legenda: `[ ]` da fare · `[~]` in corso (interrotta se la trovi a inizio sessi
 - [x] Sessione 8 — Sistema e Impostazioni (2026-09-25, v0.8.0)
 - [x] Sessione 9 — Installazione sul Raspberry (2026-09-25, v0.9.0; interrotta una volta e ripresa lo stesso giorno)
 - [x] Sessione 9b — Installazione in un solo comando (2026-09-27, v0.9.1)
-- [ ] Sessione 10 — Test reale e rifinitura (segnata `[~]` il 2026-09-25 senza lavoro fatto, rimessa `[ ]` per fare prima la 9b)
+- [~] Sessione 10 — Test reale e rifinitura (iniziata 2026-09-27; segnata `[~]` il 2026-09-25 senza lavoro fatto, rimessa `[ ]` per fare prima la 9b)
 
 ### Note tra sessioni
 _(ogni sessione aggiunge qui decisioni prese, deviazioni dal piano, problemi aperti)_

@@ -12,6 +12,12 @@ then **stop** — never start the next session.
 
 ## Conventions
 
+- **TOP RULE — no personal data in the repo (it is public).** Never write data from the user's real setup (Pi user
+  name, hostname, IP/MAC addresses, SSID/WiFi passwords, API keys, serial numbers, emails, Windows paths, pasted
+  terminal output) into code, comments, tests, fixtures, commits, tags, `docs/PLAN.md`, this file, README, CHANGELOG,
+  screenshots or the tarball. Use generic placeholders (`pi`, `octopi.local`, `192.168.1.x`, the dev key); check real-Pi
+  screenshots (System shows IP/SSID) and `git diff --cached` before every commit. Only exception: the project
+  identity already chosen (author "Filippo Castellan", git identity `FloppyO1`, repository URL).
 - Chat and `docs/PLAN.md` in **Italian**; code, comments, commits, README, CHANGELOG, `docs/ARCHITECTURE.md`
   and this file in **English**.
 - Commits: Conventional Commits, **max 3 lines total**, always ending with the co-author trailer:
