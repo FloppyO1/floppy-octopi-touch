@@ -1142,7 +1142,7 @@ _(ogni sessione aggiunge qui decisioni prese, deviazioni dal piano, problemi ape
   `FOT_DISPLAY_MODE` in kiosk.env vince e blocca l'impostazione. Endpoint `/local/display/modes`, `…/mode` (PUT),
   `…/mode/keep|revert|apply`. 78 pytest, smoke test (passo system) con prova/ripristino/conferma. **Verificata
   sul Pi** (ripristino automatico dopo 15 s e conferma ok).
-- Checklist: **7 (senza WiFi) ok**. **6 (HDMI off) bug**: si spegneva, ma al tocco restava senza segnale. Il tocco
+- Checklist: **7 (senza WiFi) ok**, **prestazioni ok** (a occhio dell'utente). **6 (HDMI off) bug**: si spegneva, ma al tocco restava senza segnale. Il tocco
   arriva a Chromium anche con l'uscita spenta (niente fallback evdev necessario), ma cage rifiuta
   `wlr-randr --on --custom-mode …` in un solo comando (`failed to apply configuration`), e `--on` da solo riaccende
   alla prima modalità dell'elenco (800×450). Corretto: `--on`, poi la modalità in un secondo comando (anche
