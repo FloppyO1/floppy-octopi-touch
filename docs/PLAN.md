@@ -1151,3 +1151,33 @@ _(ogni sessione aggiunge qui decisioni prese, deviazioni dal piano, problemi ape
 - Deciso con l'utente (2026-09-27): la **Sessione 11 parte subito sul branch `session-11`**, mentre la 10 resta `[~]`
   su `main` per i test con la stampante. Sul branch niente bump né tag; dopo la chiusura della 10 (v1.0.0 su `main`)
   il branch si unisce a `main` e si chiude la 11 con v1.1.0. Le correzioni della 10 passano nel branch con un merge.
+
+**Sessione 11 — in corso sul branch `session-11` (iniziata 2026-09-27; nota intermedia)**
+- Verifiche (tutte superate, nessuno stop necessario):
+  - **Cancel Objects 0.6.4** (paukstelis/OctoPrint-Cancelobject, tag `0.6.4` = `1332172`, pushato il 2026-09-01, non
+    archiviato; pythoncompat `>=2.7,<4`). Installato nel container **tramite l'API del Plugin Manager**
+    (`POST /api/plugin/pluginmanager {"command":"install","url":"https://github.com/paukstelis/OctoPrint-Cancelobject/archive/refs/tags/0.6.4.zip"}`
+    → `{"in_progress": true}`, esito solo nel log / messaggi socket; poi serve **riavviare OctoPrint**). Si carica senza
+    errori (container: Python 3.10; Pi: 3.11). L'elenco dei plugin è `GET /plugin/pluginmanager/plugins` (non sotto `/api`).
+  - Funzionamento: hook `octoprint.filemanager.preprocessor` → **riscrive il G-code al caricamento**: `; printing object X`
+    → `@Object X`, `; stop printing object X` → `@Objectstop X`, `M486 S<n>` (+ `M486 A<nome>`) → aggiunge `@Object <nome>`,
+    `M486 S-1` → `@Objectstop`; riconosce anche `;MESH:` (Cura), `; process` (S3D), `;PRINTING:` (ideaMaker).
+    **I file caricati prima dell'installazione non funzionano** (vanno ricaricati). Salta le righe nel hook
+    `gcode.queuing` quando incontra `@Object` di un oggetto annullato; a fine stampa con salto in corso spegne i riscaldatori.
+  - API (SimpleApi, protetta): `POST /api/plugin/cancelobject` con `{"command":"objlist"}` → `{"list":[{"id","object",
+    "active","cancelled","ignore","min_x","max_x","min_y","max_y"}]}` (id = ordine di prima comparsa nel file; min/max
+    noti solo dopo che l'oggetto è stato stampato, quindi la mappa la calcola l'agent), `{"command":"cancel","cancelled":<id>}`
+    → 204, `resetpos`; `GET` → 204 e rimanda i messaggi. Messaggi socket `plugin` = `cancelobject` con `{"objects":[…]}`,
+    `{"ActiveID": <id>}`, `{"navBarActive": "<nome>"}`; eventi `PLUGIN_CANCELOBJECT_OBJECT_LIST|OBJECT_CANCELLED|CURRENT_OBJECT`.
+    Oggetti `ENDGCODE`/`STARTGCODE` hanno `ignore: true` (da nascondere). Lista svuotata a fine/annullo stampa.
+  - Provato con la Virtual Printer: stampa di 3 oggetti, `cancel` dell'id 1 → "Hit a cancelled object … Took 0.001 to skip
+    block", la stampa finisce con gli altri due.
+  - **Marlin `M486`**: opzione `CANCEL_OBJECTS`; `T<n>` totale, `S<i>` oggetto in corso (`-1` = fuori oggetto), `P<i>`
+    annulla, `C` annulla il corrente, `U<i>` ripristina; nessuna risposta; **M115 non lo annuncia** → toggle manuale.
+  - Slicer: PrusaSlicer "Label objects" = `OctoPrint comments` (`; printing object NOME` / `; stop printing object NOME`,
+    con elenco di tutti gli oggetti in testa al file) oppure `Firmware-specific` con flavor Marlin (`M486 S<id>` +
+    `M486 A<nome>` in testa, poi `M486 S<id>` / `M486 S-1`); scrive anche `; objects_info = {"objects":[{"name",
+    "polygon":[[x,y],…]}]}` (contorni pronti per la mappa). OrcaSlicer: "Label objects" → `; printing object NOME id:N copy M`
+    / `; stop printing object …`; "Exclude objects" con flavor Marlin → `M486` come PrusaSlicer (`; start printing object,
+    unique label id` solo per stampanti Bambu). Consiglio: `OctoPrint comments` finché il firmware non ha `M486`
+    (con `Firmware-specific` Marlin risponderebbe "Unknown command" a ogni cambio oggetto), poi `Firmware-specific`.
