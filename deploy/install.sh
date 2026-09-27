@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # FloppyOctoTouch installer for OctoPi 1.1.0 (Raspberry Pi OS Bookworm Lite, arm64 or armhf).
 #
-# Run it from an extracted release: sudo ./deploy/install.sh
+# Run it from a clone or an extracted release: ./deploy/install.sh (it runs itself through sudo if needed).
+# Every question comes first (API key, display, reboot), then it works on its own until the reboot.
 # It is idempotent: running it again repairs or reconfigures an installation. See README "Installation".
 set -euo pipefail
 
@@ -12,9 +13,10 @@ SRC_DIR=$(dirname "$SCRIPT_DIR")
 
 usage() {
   cat <<EOF
-Usage: sudo $0 [options]
+Usage: $0 [options]
 
 Installs the FloppyOctoTouch dashboard: agent service, cage + Chromium kiosk on tty1, USB stick automount.
+Needs root: without it the installer runs itself again with sudo.
 
 Options:
   --non-interactive      never ask: use the detected/default answers (display settings included,
@@ -150,9 +152,11 @@ FOT_GROUP=''
 FOT_UID=''
 FOT_HOME=''
 
+# The user of octoprint.service is taken without asking; only a guess (sudo user, pi) is asked for.
 choose_user() {
-  local detected=''
-  detected=$(printf '%s\n' "$OCTOPRINT_UNIT_TEXT" | sed -n 's/^User=//p' | tail -n1)
+  local detected='' octoprint_user=''
+  octoprint_user=$(printf '%s\n' "$OCTOPRINT_UNIT_TEXT" | sed -n 's/^User=//p' | tail -n1)
+  detected=$octoprint_user
   if [ -n "$detected" ]; then
     info "octoprint.service runs as '$detected'"
   else
@@ -168,6 +172,8 @@ choose_user() {
     FOT_USER=$USER_ARG
   elif [ "$UPDATE" = 1 ] && [ -n "${FOT_USER_SAVED:-}" ]; then
     FOT_USER=$FOT_USER_SAVED
+  elif [ -n "$octoprint_user" ]; then
+    FOT_USER=$octoprint_user
   else
     [ -n "$detected" ] || [ "$NON_INTERACTIVE" = 0 ] || die "cannot detect the OctoPrint user: add --user=NAME"
     FOT_USER=$(ask_value "User that runs OctoPrint and the dashboard:" "$detected")
@@ -203,18 +209,23 @@ except Exception:
 PY
 }
 
-OCTOPRINT_REACHABLE=0
 UPLOADS_DIR=''
 
 check_octoprint() {
-  local port basedir status
+  local port basedir status i
   port=$(octoprint_option port)
   basedir=$(octoprint_option basedir)
   [ -n "$OCTOPRINT_URL" ] || OCTOPRINT_URL=http://127.0.0.1:${port:-5000}
   OCTOPRINT_URL=${OCTOPRINT_URL%/}
   UPLOADS_DIR=${basedir:-$FOT_HOME/.octoprint}/uploads
 
-  status=$(http_status "$OCTOPRINT_URL/api/version")
+  # Right after a boot OctoPrint may still be starting: give it a few seconds.
+  for i in $(seq 1 10); do
+    status=$(http_status "$OCTOPRINT_URL/api/version")
+    [ "$status" = 000 ] || break
+    [ "$i" = 1 ] && info "waiting for OctoPrint on $OCTOPRINT_URL"
+    sleep 1
+  done
   if [ "$status" = 000 ]; then
     warn "OctoPrint does not answer on $OCTOPRINT_URL"
     if [ "$UPDATE" = 0 ]; then
@@ -222,7 +233,6 @@ check_octoprint() {
         die "start OctoPrint (sudo systemctl start octoprint) or pass --octoprint-url=URL"
     fi
   else
-    OCTOPRINT_REACHABLE=1
     ok "OctoPrint answers on $OCTOPRINT_URL"
   fi
 }
@@ -346,70 +356,95 @@ except Exception:
 
 valid_key_format() { [[ $1 =~ ^[A-Za-z0-9_-]{16,128}$ ]]; }
 
-# 0 = accepted (or OctoPrint not reachable: cannot tell), 1 = rejected.
+# 0 = accepted, 1 = rejected, 2 = OctoPrint does not answer (cannot tell).
 check_key() {
   local status
-  [ "$OCTOPRINT_REACHABLE" = 1 ] || return 0
   status=$(http_status "$OCTOPRINT_URL/api/version" "$1")
-  [ "$status" = 200 ]
+  case $status in
+    200) return 0 ;;
+    000) return 2 ;;
+    *) return 1 ;;
+  esac
 }
 
-key_accepted() {
-  if [ "$OCTOPRINT_REACHABLE" = 1 ]; then
-    ok "API key …${1: -4} accepted by OctoPrint"
-  else
-    warn "API key …${1: -4} saved without checking it (OctoPrint not reachable)"
-  fi
+key_instructions() {
+  local ip host
+  ip=$(hostname -I 2>/dev/null | awk '{print $1}' || true)
+  host=$(hostname 2>/dev/null || true)
+  info "The dashboard needs an OctoPrint API key. Create it from a PC or phone:"
+  info "  1. open ${ip:+http://$ip/ (or }http://${host:-octopi}.local/${ip:+)} and log in to OctoPrint"
+  info "  2. Settings (wrench icon at the top) > Application Keys"
+  info "  3. App identifier: FloppyOctoTouch, then Generate"
+  info "  4. copy the key and paste it here (in most SSH terminals: right click or Ctrl+Shift+V)"
+  info "Just press Enter to type it later on the touch screen; Ctrl+C stops the installer."
 }
 
 choose_api_key() {
-  local key attempt
+  local key status
   if [ "$API_KEY_GIVEN" = 1 ]; then
     valid_key_format "$API_KEY" || die "--api-key: expected 16-128 letters, digits, '-' or '_'"
-    check_key "$API_KEY" || die "OctoPrint rejected the API key given with --api-key"
-    key_accepted "$API_KEY"
+    status=0
+    check_key "$API_KEY" || status=$?
+    case $status in
+      0) ok "API key …${API_KEY: -4} accepted by OctoPrint" ;;
+      1) die "OctoPrint rejected the API key given with --api-key" ;;
+      *) warn "API key …${API_KEY: -4} saved without checking it (OctoPrint does not answer)" ;;
+    esac
     return
   fi
+  # A saved key that still works is kept without asking (change it with --api-key= or on the touch screen).
   if [ -n "$SAVED_KEY" ]; then
     if [ "$UPDATE" = 1 ]; then
       info "keeping the saved API key …${SAVED_KEY: -4}"
       return
     fi
-    if check_key "$SAVED_KEY"; then
-      if ask_yes_no "Keep the saved API key …${SAVED_KEY: -4}?" y; then
-        ok "API key …${SAVED_KEY: -4} kept"
+    status=0
+    check_key "$SAVED_KEY" || status=$?
+    case $status in
+      0)
+        ok "saved API key …${SAVED_KEY: -4} still accepted by OctoPrint: kept"
         return
-      fi
-    else
-      warn "OctoPrint rejects the saved API key …${SAVED_KEY: -4}"
-    fi
+        ;;
+      2)
+        info "keeping the saved API key …${SAVED_KEY: -4} (not checked: OctoPrint does not answer)"
+        return
+        ;;
+    esac
+    warn "OctoPrint rejects the saved API key …${SAVED_KEY: -4}"
   fi
   if [ "$UPDATE" = 1 ] || [ "$NON_INTERACTIVE" = 1 ]; then
-    [ -n "$SAVED_KEY" ] || warn "no API key: enter it on the touch screen (the dashboard asks for it)"
+    warn "no working API key: enter it on the touch screen (the dashboard asks for it)"
     return
   fi
 
-  info "The dashboard needs an OctoPrint API key. Create one in OctoPrint from a PC:"
-  info "  Settings (wrench icon) > Application Keys > name 'FloppyOctoTouch' > Generate, then copy it."
-  info "Leave it empty to enter it later on the touch screen."
-  for attempt in 1 2 3; do
-    key=$(ask_secret "OctoPrint API key (typing is hidden):")
+  key_instructions
+  while true; do
+    key=$(ask_secret "Paste the API key and press Enter (it stays hidden):")
     key=${key//[[:space:]]/}
     if [ -z "$key" ]; then
-      warn "no API key: enter it on the touch screen (the dashboard asks for it)"
+      warn "no API key for now: the touch screen asks for it when the dashboard starts"
       return
     fi
     if ! valid_key_format "$key"; then
-      warn "that does not look like an API key (16-128 letters, digits, '-' or '_')"
-    elif ! check_key "$key"; then
-      warn "OctoPrint rejected that key (attempt $attempt of 3)"
-    else
-      API_KEY=$key
-      key_accepted "$key"
-      return
+      warn "that does not look like an API key (16-128 letters, digits, '-' or '_'): paste it again"
+      continue
     fi
+    status=0
+    check_key "$key" || status=$?
+    case $status in
+      0)
+        API_KEY=$key
+        ok "API key …${key: -4} accepted by OctoPrint"
+        return
+        ;;
+      2)
+        API_KEY=$key
+        warn "OctoPrint does not answer: API key …${key: -4} saved without checking it"
+        return
+        ;;
+    esac
+    warn "OctoPrint rejected that key: copy it again from Application Keys and paste it (Ctrl+C to stop)"
   done
-  warn "no valid API key: enter it later on the touch screen"
 }
 
 DISPLAY_OUTPUT=HDMI-A-1
@@ -535,35 +570,56 @@ install_system_files() {
 # ------------------------------------------------------------------------------------ display
 BOOT_CHANGED=0
 CMDLINE_TOKEN_ADDED=${FOT_CMDLINE_TOKEN:-}
+DISPLAY_WANTED=0
+BOOT_CONFIG=''
+BOOT_CMDLINE=''
+HAS_BLOCK=0
+HAS_TOKEN=0
 
-configure_display() {
-  local dir config cmdline token has_block=0 has_token=0
-  if [ "$SKIP_DISPLAY" = 1 ]; then
-    return
-  fi
+# Asked before anything is installed; configure_display() applies the answer later.
+plan_display() {
+  local dir
+  [ "$SKIP_DISPLAY" = 0 ] || return 0
   if ! dir=$(boot_dir); then
     warn "config.txt not found in /boot/firmware or /boot: display settings skipped"
     return
   fi
-  config=$dir/config.txt
-  cmdline=$dir/cmdline.txt
-  token="video=$DISPLAY_OUTPUT:1024x600@60"
-  grep -qxF "$DISPLAY_BEGIN" "$config" && has_block=1
-  if [ ! -f "$cmdline" ] || grep -q "video=$DISPLAY_OUTPUT:" "$cmdline"; then
-    has_token=1
+  BOOT_CONFIG=$dir/config.txt
+  BOOT_CMDLINE=$dir/cmdline.txt
+  grep -qxF "$DISPLAY_BEGIN" "$BOOT_CONFIG" && HAS_BLOCK=1
+  if [ ! -f "$BOOT_CMDLINE" ] || grep -q "video=$DISPLAY_OUTPUT:" "$BOOT_CMDLINE"; then
+    HAS_TOKEN=1
   fi
-  if [ "$has_block" = 1 ] && [ "$has_token" = 1 ]; then
-    ok "display settings already in $config"
+  if [ "$HAS_BLOCK" = 1 ] && [ "$HAS_TOKEN" = 1 ]; then
+    ok "display settings already in $BOOT_CONFIG"
     return
   fi
-
-  info "The 7\" HDMI Display (H) needs its 1024x600 mode in $config (manufacturer's lines) and"
-  info "'$token' in $cmdline (KMS driver). Backups are kept; uninstall.sh removes the lines."
-  if ! ask_yes_no "Add the display settings?" y; then
+  info "The 7\" HDMI Display (H) needs its 1024x600 mode in $BOOT_CONFIG (manufacturer's lines) and"
+  info "'video=$DISPLAY_OUTPUT:1024x600@60' in $BOOT_CMDLINE. Backups are kept; uninstalling removes the lines."
+  if ask_yes_no "Add the display settings?" y; then
+    DISPLAY_WANTED=1
+  else
     info "display settings skipped"
-    return
   fi
-  if [ "$has_block" = 0 ]; then
+}
+
+REBOOT_WANTED=0
+
+plan_reboot() {
+  [ "$UPDATE" = 0 ] && [ "$NON_INTERACTIVE" = 0 ] || return 0
+  if [ "$DISPLAY_WANTED" = 1 ]; then
+    ask_yes_no "Reboot automatically at the end (needed for the display settings)?" y && REBOOT_WANTED=1
+  else
+    ask_yes_no "Reboot automatically at the end (not needed: the dashboard starts right away)?" n &&
+      REBOOT_WANTED=1
+  fi
+  return 0
+}
+
+configure_display() {
+  local config=$BOOT_CONFIG cmdline=$BOOT_CMDLINE token="video=$DISPLAY_OUTPUT:1024x600@60"
+  [ "$DISPLAY_WANTED" = 1 ] || return 0
+  if [ "$HAS_BLOCK" = 0 ]; then
     backup_file "$config"
     cat >>"$config" <<EOF
 
@@ -580,7 +636,7 @@ $DISPLAY_END
 EOF
     ok "added the display block to $config"
   fi
-  if [ "$has_token" = 0 ]; then
+  if [ "$HAS_TOKEN" = 0 ]; then
     backup_file "$cmdline"
     sed -i "1 s|\$| $token|" "$cmdline"
     CMDLINE_TOKEN_ADDED=$token
@@ -657,14 +713,20 @@ summary() {
   local ip=''
   ip=$(hostname -I 2>/dev/null | awk '{print $1}' || true)
   step "FloppyOctoTouch $VERSION installed"
+  local key=${API_KEY:-$SAVED_KEY}
   info "user:           $FOT_USER"
+  if [ -n "$key" ]; then
+    info "API key:        …${key: -4}"
+  else
+    info "API key:        none yet (the touch screen asks for it)"
+  fi
   info "agent:          ${AGENT_STATE:-installed} (http://127.0.0.1:8765)"
   info "configuration:  $CONFIG_FILE"
   info "kiosk options:  $FOT_KIOSK_ENV"
   info "OctoPrint:      $OCTOPRINT_URL${ip:+ (from a PC: http://$ip/)}"
   info "logs:           journalctl -u $AGENT_UNIT -u $KIOSK_UNIT -b"
-  info "update:         sudo floppyoctotouch-update floppyoctotouch-X.Y.Z.tar.gz"
-  info "uninstall:      sudo floppyoctotouch-uninstall"
+  info "update:         git pull in the clone, then ./deploy/install.sh (or floppyoctotouch-update X.tar.gz)"
+  info "uninstall:      floppyoctotouch-uninstall"
 }
 
 # Run from a git clone: the web app is not built there, but release/ holds the latest release tarball.
@@ -693,7 +755,7 @@ run_bundled_release() {
 
 main() {
   parse_args "$@"
-  require_root "$@"
+  ensure_root "$SCRIPT_DIR/install.sh" "$@"
   require_tty
   run_bundled_release "$@"
   load_state
@@ -706,9 +768,22 @@ main() {
   read_octoprint_unit
   choose_user
   check_octoprint
+
+  # Every question is asked here, before apt and pip (which take minutes).
+  if [ "$UPDATE" = 0 ]; then
+    step "Setup"
+  fi
+  read_saved_key
+  choose_api_key
   if [ "$LISTEN_LAN" = 1 ] && [ "$UPDATE" = 0 ]; then
     warn "--listen-lan: the agent adds the API key to every request, anyone on the network controls the printer"
     ask_yes_no "Listen on the network anyway?" n || LISTEN_LAN=0
+  fi
+  detect_display_output
+  plan_display
+  plan_reboot
+  if [ "$UPDATE" = 0 ] && [ "$NON_INTERACTIVE" = 0 ]; then
+    info "No more questions: the installer works on its own now (a few minutes)."
   fi
 
   step "Installing packages"
@@ -719,15 +794,12 @@ main() {
   install_venv
 
   step "Configuring the agent"
-  read_saved_key
-  choose_api_key
-  detect_display_output
   write_config
 
   step "Installing services, kiosk and USB automount"
   install_system_files
 
-  if [ "$SKIP_DISPLAY" = 0 ]; then
+  if [ "$DISPLAY_WANTED" = 1 ]; then
     step "Display settings"
     configure_display
   fi
@@ -736,18 +808,26 @@ main() {
   step "Starting"
   start_services
   summary
+  finish
+}
 
-  # Reboot prompt: needed for the display settings, otherwise the kiosk starts right away.
-  if [ "$UPDATE" = 0 ] && [ "$NON_INTERACTIVE" = 0 ] && systemd_running; then
-    local default=n
-    [ "$BOOT_CHANGED" = 1 ] && default=y
-    if ask_yes_no "Reboot now? (needed for the display settings; otherwise the kiosk starts now)" "$default"; then
-      info "rebooting"
-      systemctl reboot
+# Reboot with a countdown when it was asked for at the start; otherwise (or when cancelled) start the kiosk.
+finish() {
+  if [ "$REBOOT_WANTED" = 1 ]; then
+    if countdown 10 "Rebooting"; then
+      if systemd_running; then
+        info "rebooting"
+        systemctl reboot
+        return
+      fi
+      warn "systemd is not running (container?): not rebooting"
       return
     fi
+    info "reboot cancelled: starting the dashboard now"
   fi
-  [ "$BOOT_CHANGED" = 1 ] && info "reboot to apply the display settings: sudo reboot"
+  if [ "$BOOT_CHANGED" = 1 ]; then
+    info "reboot later to apply the display settings: sudo reboot"
+  fi
   start_kiosk
 }
 

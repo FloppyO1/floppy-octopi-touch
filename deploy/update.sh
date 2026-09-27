@@ -2,7 +2,7 @@
 # Updates FloppyOctoTouch from a release tarball, keeping the configuration (API key, dashboard settings,
 # kiosk options). Installed as /usr/local/bin/floppyoctotouch-update.
 #
-#   sudo floppyoctotouch-update floppyoctotouch-X.Y.Z.tar.gz
+#   floppyoctotouch-update floppyoctotouch-X.Y.Z.tar.gz
 set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)
@@ -11,10 +11,10 @@ SCRIPT_DIR=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)
 
 usage() {
   cat <<EOF
-Usage: sudo $0 [options] floppyoctotouch-X.Y.Z.tar.gz
+Usage: $0 [options] floppyoctotouch-X.Y.Z.tar.gz
 
-Installs a new release over the current one. The API key, the dashboard settings and the kiosk options
-are kept; the display settings in config.txt are not touched.
+Installs a new release over the current one (runs itself through sudo when needed). The API key, the
+dashboard settings and the kiosk options are kept; the display settings in config.txt are not touched.
 The checksum file (floppyoctotouch-X.Y.Z.tar.gz.sha256) next to the tarball is checked when present.
 
 Options:
@@ -76,7 +76,7 @@ main() {
   local new_dir dir new_version installed newest
   local -a args
   parse_args "$@"
-  require_root "$@"
+  ensure_root "$(readlink -f "${BASH_SOURCE[0]}")" "$@"
   require_tty
   [ -f "$FOT_STATE" ] || die "FloppyOctoTouch is not installed here: run deploy/install.sh from the release"
   load_state

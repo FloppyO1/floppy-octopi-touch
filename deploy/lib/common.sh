@@ -34,8 +34,19 @@ die() {
   exit 1
 }
 
-require_root() {
-  [ "$(id -u)" = 0 ] || die "run this script as root, e.g.: sudo $0 $*"
+# ensure_root SCRIPT ARGS...: not root -> run the script again through sudo (with bash, so a lost executable
+# bit does not matter). With --non-interactive sudo must not ask for a password.
+ensure_root() {
+  local script=$1
+  shift
+  [ "$(id -u)" = 0 ] && return 0
+  command -v sudo >/dev/null ||
+    die "this script needs root and sudo is not installed: run it as root (su -c 'bash $script $*')"
+  info "root privileges needed: running it again with sudo"
+  if [ "$NON_INTERACTIVE" = 1 ]; then
+    exec sudo -n -- bash "$script" "$@"
+  fi
+  exec sudo -- bash "$script" "$@"
 }
 
 # Prompts read the terminal directly, so they work even when stdin is a pipe.
@@ -85,6 +96,20 @@ ask_secret() {
   IFS= read -rs answer </dev/tty || answer=''
   printf '\n' >/dev/tty
   printf '%s\n' "$answer"
+}
+
+# countdown SECONDS MESSAGE: 0 when it ran out, 1 when Ctrl+C cancelled it.
+countdown() {
+  local seconds=$1 message=$2 cancelled=0
+  trap 'cancelled=1' INT
+  while [ "$seconds" -gt 0 ] && [ "$cancelled" = 0 ]; do
+    printf '\r    %s in %2d s (Ctrl+C to cancel) ' "$message" "$seconds"
+    sleep 1 || true
+    seconds=$((seconds - 1))
+  done
+  trap - INT
+  printf '\n'
+  [ "$cancelled" = 0 ]
 }
 
 # systemd as PID 1? In a plain container units can be enabled (symlinks) but not started.

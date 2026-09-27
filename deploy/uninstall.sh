@@ -10,7 +10,9 @@ SCRIPT_DIR=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)
 
 usage() {
   cat <<EOF
-Usage: sudo $0 [options]
+Usage: $0 [options]
+
+Runs itself through sudo when needed.
 
 Options:
   --non-interactive       never ask: remove everything except the configuration (unless --purge)
@@ -111,7 +113,7 @@ remove_config() {
 
 main() {
   parse_args "$@"
-  require_root "$@"
+  ensure_root "$(readlink -f "${BASH_SOURCE[0]}")" "$@"
   require_tty
   if [ ! -f "$FOT_STATE" ] && [ ! -d "$FOT_PREFIX" ] && [ ! -f "$UNIT_DIR/$AGENT_UNIT" ]; then
     info "FloppyOctoTouch is not installed"
