@@ -30,7 +30,7 @@ Procedura:
      se la sessione si allunga, spezzarla in 10a / 10b.
    - In qualsiasi sessione: quando serve una decisione che il piano non copre.
 6. Chiusura: checklist della sezione 3, con **versione = 0.N.0** e tag `v0.N.0` per la Sessione N
-   (eccezioni: Sessione 9b → `0.9.1` / `v0.9.1`; Sessione 10 → `1.0.0` / `v1.0.0`). Marcare la riga come `[x]` con la data, aggiungere le note
+   (eccezioni: Sessione 9b → `0.9.1` / `v0.9.1`; Sessione 10 → `1.0.0` / `v1.0.0`; Sessione 11 → `1.1.0` / `v1.1.0`). Marcare la riga come `[x]` con la data, aggiungere le note
    in "Note tra sessioni".
 7. **Fermarsi.** Non iniziare la sessione successiva: l'utente riavvierà con lo stesso prompt in una nuova sessione.
 
@@ -93,6 +93,10 @@ Procedura:
 ### Extra
 - Notifica **fine stampa** a schermo (popup grande) + beep opzionale (`M300`).
 - **Controllo PSU/luci**: supporto al plugin **PSU Control** se installato + "azioni personalizzate" configurabili (G-code, system command OctoPrint, chiamata API plugin).
+- **Rimozione di oggetti dalla stampa in corso** (dopo la 1.0.0, Sessione 11): mappa del piatto con le sagome degli
+  oggetti + elenco, tocco → conferma → l'oggetto non viene più stampato. Meccanismo automatico: `M486` se il firmware
+  ha `CANCEL_OBJECTS` (oggi **no** sulla Tatara A8), altrimenti il plugin OctoPrint **Cancel Objects**, proposto
+  dall'installer.
 
 ### Sviluppo e distribuzione
 - **Git locale** (niente remote: lo aggiunge l'utente). Predisporre tutto per GitHub: `README.md` **in inglese**, `LICENSE` **MIT**, `.gitignore`, `CHANGELOG.md`.
@@ -475,6 +479,62 @@ Leggi docs/PLAN.md e CLAUDE.md. Esegui la Sessione 10 (io ho il Raspberry davant
 - Se la sessione si allunga per i bug, spezzala: 10a (installazione + checklist), 10b (fix + rifinitura), con stop fra le due.
 ```
 
+### Sessione 11 — Rimozione di oggetti dalla stampa in corso
+Obiettivo: durante una stampa con più oggetti, toccare un oggetto su una mappa del piatto (o nell'elenco), confermare,
+e la stampante smette di stamparlo mentre continua gli altri. Decisioni dell'utente (2026-09-27): meccanismo
+**automatico** fra firmware (`M486`) e plugin OctoPrint **Cancel Objects** (il firmware attuale **non** ha
+`CANCEL_OBJECTS`, quindi oggi si usa il plugin); interfaccia **mappa del piatto + elenco**; plugin proposto da una
+**domanda dell'installer** (Invio = sì); sessione **dopo la 1.0.0** → v1.1.0.
+```
+Leggi docs/PLAN.md e CLAUDE.md. Esegui la Sessione 11:
+- Verifiche prima di scrivere codice (non inventare API; se una verifica fallisce FERMATI e chiedi all'utente):
+  - plugin Cancel Objects (paukstelis/OctoPrint-Cancelobject, o il fork mantenuto che il repository dei plugin di
+    OctoPrint indica): installarlo nel container di dev (OctoPrint 1.11.8, Python 3.11) a una versione FISSATA, vedere
+    che si carichi senza errori e documentare davvero la sua API (SimpleApi: elenco oggetti, oggetto corrente, annulla),
+    i messaggi socket/plugin che manda, i formati di etichette che riconosce e cosa fa con le righe `M486` quando il
+    firmware non le conosce;
+  - Marlin 2.1 `M486` (`S` definisce/indica l'oggetto, `P` annulla per indice, `C` annulla il corrente, `U` ripristina,
+    `T` numero oggetti): sintassi e risposte dalla documentazione di Marlin; controllare se M115 espone qualcosa per
+    `CANCEL_OBJECTS` (probabilmente no → toggle manuale);
+  - etichette degli slicer: PrusaSlicer "Label objects" (`OctoPrint comments` = `; printing object …` /
+    `; stop printing object …`; `Firmware-specific` = `M486` per Marlin), OrcaSlicer "Label objects" / "Exclude objects"
+    (`; start printing object, unique label id: N`, `EXCLUDE_OBJECT_DEFINE … POLYGON=…`), Cura `;MESH:`.
+- Capability: `cancelObjects` = `m486` | `plugin` | `none`. `m486` solo con il toggle firmware (auto/on/off nelle
+  impostazioni, come M600/M701/M702, default off); `plugin` se Cancel Objects risulta installato e attivo (come PSU
+  Control in core/printerState); altrimenti `none` → nessun pulsante. Con M486 disponibile ha la precedenza.
+- Agent `/local/objects?path=…` (solo storage local; SD e file non analizzabili → elenco vuoto): legge il G-code dagli
+  uploads come per le miniature, riconosce le etichette sopra, calcola per ogni oggetto nome, id/indice (quello che
+  userà il meccanismo scelto), sagoma XY (inviluppo convesso dei movimenti di estrusione, o `POLYGON` se presente),
+  centro e bounding box; cache su disco per path + size + mtime; limiti di dimensione e tempo come per le miniature.
+  Test pytest con fixture di G-code reali/sintetici per ogni formato.
+- Stato durante la stampa: oggetto corrente e oggetti annullati dal plugin (API/messaggi) o, con M486, dal log
+  (`M486 S<n>` inviati, risposte del firmware); lo stato riparte pulito a ogni nuovo job e si ricostruisce se l'app
+  si ricarica a metà stampa.
+- UI (core/ + screens/home/): pulsante "Oggetti" nella Home in stampa, visibile solo con ≥ 2 oggetti e un meccanismo
+  disponibile; dialog con mappa del piatto in SVG (dimensioni e origine dal profilo stampante di OctoPrint), sagome
+  toccabili (target ≥ 56 px anche per oggetti piccoli: area di tocco allargata o selezione dall'elenco), oggetto in
+  stampa evidenziato, annullati barrati/grigi; elenco con i nomi (oggetti con lo stesso nome distinti dal numero);
+  conferma prima di annullare; non si può annullare l'ultimo oggetto rimasto (si propone Stop). Niente "ripristina"
+  in v1. i18n en + it.
+- Installer: nuova domanda all'inizio (prima di apt, con le altre) "Install the plugin to cancel single objects during
+  a print? [Y/n]", solo se il plugin non è già installato; installazione tramite l'API del Plugin Manager di OctoPrint
+  (stesso percorso del pulsante di OctoPrint, versione fissata verificata sopra); se la key non ha i permessi da
+  amministratore o manca la rete → avviso con i passi manuali, l'installazione continua. Riavvio di OctoPrint solo se
+  non sta stampando (altrimenti avviso "riavvia OctoPrint dopo la stampa"). Flag `--no-cancel-plugin`; in
+  `--non-interactive` si installa salvo il flag. Lo stato ricorda se il plugin l'ha installato l'installer:
+  `uninstall.sh` lo toglie solo in quel caso e chiedendo. deploy-test: finto Plugin Manager e finto `/api/job` in
+  fake_octoprint.py, nuove risposte in drive.py (sì, no, key senza permessi, stampa in corso).
+- Dev: plugin installato nel container OctoPrint (init.sh, versione fissata); campioni in dev/sample-gcode con più
+  oggetti nei formati PrusaSlicer (commenti e M486) e OrcaSlicer (make_sample_gcode.py); smoke test Playwright:
+  pulsante, mappa, conferma, oggetto annullato (plugin nel container; M486 con override delle capability e righe
+  finte via `!!DEBUG:send`). Screenshot 1024×600 del dialog.
+- README: funzione, impostazioni dello slicer consigliate ("Label objects": `OctoPrint comments` senza M486,
+  `Firmware-specific` con M486), cosa chiede l'installer; ARCHITECTURE (endpoint, capability, flusso); CHANGELOG.
+- Verifica finale sul Pi con la stampante (stop intermedio: l'utente prova una stampa con 3-4 oggetti piccoli e ne
+  annulla uno, riporta l'esito).
+- Chiusura sessione (sezione 3) con versione 1.1.0 e tag v1.1.0 locale, poi FERMATI.
+```
+
 ---
 
 ## 5. Rischi e punti da verificare
@@ -494,6 +554,9 @@ Leggi docs/PLAN.md e CLAUDE.md. Esegui la Sessione 10 (io ho il Raspberry davant
 | Storage SD via seriale lento e bloccante durante la stampa | Refresh SD solo su richiesta e mai durante la stampa; nessun upload verso SD in v1 |
 | Host prompt Marlin non emulati dalla Virtual Printer | Test con righe `//action:` fittizie; verifica reale in S10 |
 | Tipo estrusore sconosciuto → carico/scarico errati | Default prudenti + richiesta di configurazione al primo wizard |
+| Plugin Cancel Objects non mantenuto / incompatibile con OctoPrint 1.11 | Verifica nel container a inizio Sessione 11, versione fissata; se rotto stop e decisione dell'utente (fork o plugin nostro) |
+| Installazione del plugin che disturba OctoPrint | Solo via API del Plugin Manager, versione fissata, mai riavvio durante la stampa, uninstall solo se installato da noi |
+| G-code senza etichette degli oggetti (slicer non configurato) | Pulsante nascosto; README con l'impostazione "Label objects" dello slicer |
 
 ---
 
@@ -512,6 +575,7 @@ _Legenda: `[ ]` da fare · `[~]` in corso (interrotta se la trovi a inizio sessi
 - [x] Sessione 9 — Installazione sul Raspberry (2026-09-25, v0.9.0; interrotta una volta e ripresa lo stesso giorno)
 - [x] Sessione 9b — Installazione in un solo comando (2026-09-27, v0.9.1)
 - [~] Sessione 10 — Test reale e rifinitura (iniziata 2026-09-27; segnata `[~]` il 2026-09-25 senza lavoro fatto, rimessa `[ ]` per fare prima la 9b)
+- [ ] Sessione 11 — Rimozione di oggetti dalla stampa in corso (aggiunta il 2026-09-27, v1.1.0)
 
 ### Note tra sessioni
 _(ogni sessione aggiunge qui decisioni prese, deviazioni dal piano, problemi aperti)_
@@ -1045,3 +1109,29 @@ _(ogni sessione aggiunge qui decisioni prese, deviazioni dal piano, problemi ape
   più tutto l'elenco della Sessione 9.
 - Comandi utili: `docker compose -f dev/docker-compose.yml run --rm release` poi `… run --rm deploy-test`; i
   transcript delle esecuzioni interattive sono in `/tmp/drive*.log` nel container (stampati anche nel log del test).
+
+**Sessione 10 — in corso (iniziata 2026-09-27; nota intermedia, da completare alla chiusura)**
+- Passo 1 (installazione sul Pi reale, OctoPi 1.1.0 armhf, utente rinominato in Raspberry Pi Imager): **ok** dopo tre
+  correzioni, poi boot → kiosk automatico, schermo pieno, niente cursore, tocco preciso. Stampante non ancora collegata:
+  il resto della checklist (stampante, SD, USB, webcam, M300, host prompt, HDMI off, prestazioni) è da fare.
+- Bug trovati e corretti (commit locali, pushati dall'utente):
+  - `11afddf` OctoPi 1.1.0 scrive `User=1000` (uid) in `octoprint.service`: l'installer ora lo traduce nel nome;
+  - `2db7fa4` la unit di OctoPi 1.1.0 passa `--host=${HOST} --port=${PORT}` con `Environment="PORT=5000"`: le variabili
+    ora sono risolte (anche da `EnvironmentFile=`); il deploy-test usa quella unit con porta 5001;
+  - `b832f9a` cage disegna la sua freccia al centro dello schermo (il CSS la nasconde solo sulla pagina): tema Xcursor
+    trasparente generato dall'installer (`/opt/floppyoctotouch/cursors`, `XCURSOR_PATH` nella unit del kiosk);
+  - `c3aba13` lo schermo 7" annuncia via EDID solo modalità 16:9 fino a 1920×1080 (le scala lui), non 1024×600: cage
+    sceglieva 1920×1080 e l'app fissa 1024×600 occupava un quarto dello schermo. `video=HDMI-A-1:1024x600@60` in
+    cmdline.txt non ha effetto (la modalità non è nell'EDID) e le righe `hdmi_*` di config.txt non valgono con KMS.
+    Ora `kiosk.sh` fa `wlr-randr --output <out> --custom-mode 1024x600@60Hz` all'avvio e l'agent la reimposta quando
+    riaccende lo schermo (`FOT_DISPLAY_MODE` in kiosk.env, condivisa dalle due unit; `preferred` = modalità dello schermo).
+- Verificato sul Pi: socket `wayland-0` corretto per `wlr-randr`; `sudo` chiede la password all'utente creato con
+  Imager (l'auto-elevazione funziona comunque); OctoPrint 1.11.8 genera Application Key da 43 caratteri
+  (`token_urlsafe`), accettate da installer e agent (provato anche nel container). La prima key non funzionava perché
+  scritta male sul touch: alla reinstallazione, incollata, è stata accettata.
+- Da rifinire alla fine: messaggio prima di apt che avvisa che il download (Chromium ~110 MB) può durare minuti senza
+  barra di avanzamento; valutare se togliere/sostituire la riga `video=` e le righe `hdmi_*` (inutili con questo
+  schermo); connessione iniziale a OctoPrint percepita lenta (da misurare); eventuale adattamento dell'app a
+  risoluzioni diverse da 1024×600 come paracadute.
+- Deciso con l'utente: nuova **Sessione 11** (rimozione oggetti, v1.1.0), vedi sezione 4.
+- Errore di processo: un `python3 --version` lanciato per sbaglio sul PC host (nessun effetto); da non ripetere.

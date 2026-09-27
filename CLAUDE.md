@@ -28,7 +28,7 @@ then **stop** — never start the next session.
   ```
   (update the trailer if the model changes). Remote `github` = `https://github.com/FloppyO1/floppy-octopi-touch`,
   managed by the user: Claude commits and tags locally and **never pushes**.
-- Versioning: SemVer, session N closes with version `0.N.0` and tag `v0.N.0` (session 10 → `1.0.0`).
+- Versioning: SemVer, session N closes with version `0.N.0` and tag `v0.N.0` (session 10 → `1.0.0`, session 11 → `1.1.0`).
   Keep `frontend/package.json` and `agent/pyproject.toml` versions aligned; add a CHANGELOG entry.
 - **No tooling on the Windows host**: Node, npm, Python, pytest, ruff, Playwright, shellcheck run only in
   Docker (even though Node/Python exist on the PC). Never `npm install` / `pip install` on the host.
