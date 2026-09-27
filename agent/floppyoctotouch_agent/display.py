@@ -98,11 +98,15 @@ class Display:
             if self.backend == "none":
                 log.info("display %s (backend 'none': nothing switched)", "on" if on else "off")
             else:
-                args = ["--output", self.output, "--on" if on else "--off"]
-                if on and self.mode != PREFERRED:
-                    args += self._mode_args(self.mode)
-                await self._randr(*args)
+                await self._randr("--output", self.output, "--on" if on else "--off")
                 log.info("display %s (%s)", "on" if on else "off", self.output)
+                if on:
+                    # cage refuses --on together with a mode, and --on alone picks the first mode
+                    # in the list (800x450 on the 7" screen): set the mode in a second step.
+                    try:
+                        await self._apply(self.mode)
+                    except DisplayError as exc:
+                        log.warning("display on, but the mode %s failed: %s", self.mode, exc)
             self.on = on
 
     async def modes(self) -> dict[str, object]:

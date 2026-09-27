@@ -102,11 +102,12 @@ async def test_display_wlr_randr_command(make_client, monkeypatch):
     assert (await client.put("/local/display", json={"on": True})).status == 200
     assert calls == [
         ("wlr-randr", "--output", "HDMI-A-2", "--off"),
-        ("wlr-randr", "--output", "HDMI-A-2", "--on", "--custom-mode", "1024x600@60Hz"),
+        ("wlr-randr", "--output", "HDMI-A-2", "--on"),
+        ("wlr-randr", "--output", "HDMI-A-2", "--custom-mode", "1024x600@60Hz"),
     ]
 
 
-async def test_display_preferred_mode_is_not_forced(make_client, monkeypatch):
+async def test_display_on_sets_the_preferred_mode_too(make_client, monkeypatch):
     calls = []
 
     async def fake_exec(*args, **kwargs):
@@ -116,7 +117,27 @@ async def test_display_preferred_mode_is_not_forced(make_client, monkeypatch):
     monkeypatch.setattr(display_module.asyncio, "create_subprocess_exec", fake_exec)
     client = await make_client(display_mode="preferred")
     assert (await client.put("/local/display", json={"on": True})).status == 200
-    assert calls == [("wlr-randr", "--output", "HDMI-A-1", "--on")]
+    # --on alone would keep the first mode of the list (800x450 on the 7" screen).
+    assert calls == [
+        ("wlr-randr", "--output", "HDMI-A-1", "--on"),
+        ("wlr-randr", "--output", "HDMI-A-1", "--preferred"),
+    ]
+
+
+async def test_display_on_even_when_the_mode_fails(make_client, monkeypatch):
+    async def fake_exec(*args, **kwargs):
+        return (
+            FakeProcess(1, b"failed to apply configuration")
+            if "--custom-mode" in args
+            else FakeProcess(0)
+        )
+
+    monkeypatch.setattr(display_module.asyncio, "create_subprocess_exec", fake_exec)
+    client = await make_client()
+    await client.put("/local/display", json={"on": False})
+    resp = await client.put("/local/display", json={"on": True})
+    assert resp.status == 200
+    assert (await resp.json())["on"] is True
 
 
 async def test_display_failure_keeps_the_state(make_client, monkeypatch):

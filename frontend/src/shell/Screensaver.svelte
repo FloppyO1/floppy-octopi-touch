@@ -43,13 +43,29 @@
       .catch(() => {});
   });
 
-  // HDMI output follows the "off" level; errors are logged by the agent, the UI just stays black.
+  // HDMI output follows the "off" level; errors are logged by the agent. Waking up is retried: the UI
+  // is already active, so a failed "on" would otherwise leave the screen dark until the next "off".
   let displayOff = false;
+  async function switchDisplay(on: boolean) {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        await setDisplayPower(on);
+        return;
+      } catch (error) {
+        if (!on || displayOff || attempt >= 3) {
+          console.warn('display power', error);
+          return;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        if (displayOff) return;
+      }
+    }
+  }
   $effect(() => {
     const off = mode === 'off';
     if (off === displayOff) return;
     displayOff = off;
-    setDisplayPower(!off).catch((error) => console.warn('display power', error));
+    void switchDisplay(!off);
   });
 </script>
 

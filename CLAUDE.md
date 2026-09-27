@@ -145,6 +145,13 @@ dev/deploy-test/               installer test on Debian bookworm (run.sh, fake_o
 - The agent dev image stores the package version at build time: after a version bump run
   `docker compose -f dev/docker-compose.yml build agent` (otherwise `/local/health` reports the old version).
 - Screenshots can fail with `EINVAL` on the Windows bind mount when the PNG is open in the IDE: just rerun.
+- Windows may reserve port 5173 (`bind: … autorizzazioni`), so `up`/`playwright` cannot start `frontend`. Run Vite
+  inside the Docker network only, then Playwright without deps:
+  `docker compose -f dev/docker-compose.yml run -d --rm --no-deps --use-aliases --name fot-vite frontend`, then
+  `… run --rm --no-deps -e ONLY=screensaver playwright`, finally `docker stop fot-vite`. Or test the agent build:
+  `run --rm build`, then `-e BASE_URL=http://agent:8765` (DEV-only steps are skipped there).
+- cage (wlroots) on the Pi refuses `wlr-randr --on` together with a mode, and `--on` alone picks the first mode of
+  the list (800x450 on the 7" screen): the agent switches the output on, then sets the mode in a second call.
 - In the Bash tool, long multi-file heredocs can fail to parse: prefer the Write tool for new files.
 - Settings are saved 400 ms after `settings.update()`: a Playwright step that changes them and then navigates
   must `await window.__fot.settings.flush()`, or the change (e.g. a 3 s screensaver timeout) is lost or, worse,
