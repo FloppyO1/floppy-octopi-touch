@@ -1194,7 +1194,9 @@ _(ogni sessione aggiunge qui decisioni prese, deviazioni dal piano, problemi ape
     se l'aveva messo l'installer; deploy-test **122/122**; README aggiornato.
   - bug trovato e corretto: `M486 A<nome>` con "copy" nel nome veniva letto come `C` (annulla il corrente).
     Nota: anche Marlin reale potrebbe leggere parole del nome come parametri → consigliare `OctoPrint comments`.
-  - in corso quando ci siamo fermati: smoke test **completo** lanciato in background (esito da ricontrollare:
+  - smoke test **completo**: **fallito nel passo `move`** ("x not clamped: 50.00", limite del volume nel jog; forse
+    instabilità nota della Virtual Printer con i jog ravvicinati, forse stato lasciato dai passi prima): da indagare e
+    rilanciare (
     `docker compose -f dev/docker-compose.yml run --rm --no-deps playwright` con `fot-vite` avviato, vedi CLAUDE.md).
   - da fare: ARCHITECTURE (endpoint, capability, flusso), CHANGELOG (voce "Unreleased"), CLAUDE.md (layout: objects.py,
     core/objects, store, ObjectsDialog, campioni; gotcha plugin = riscrive al caricamento), verifica sul Pi con la
