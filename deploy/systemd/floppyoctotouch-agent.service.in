@@ -13,6 +13,8 @@ Environment=FOT_CONFIG=@HOME@/.config/floppyoctotouch/config.json
 Environment=XDG_RUNTIME_DIR=/run/user/@UID@
 Environment=WAYLAND_DISPLAY=wayland-0
 Environment=PYTHONUNBUFFERED=1
+# FOT_DISPLAY_MODE (screen mode after waking up) is shared with the kiosk.
+EnvironmentFile=-/etc/floppyoctotouch/kiosk.env
 ExecStart=@PREFIX@/venv/bin/floppyoctotouch-agent
 Restart=always
 RestartSec=3

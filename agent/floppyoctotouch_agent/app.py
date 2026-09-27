@@ -123,7 +123,7 @@ def create_app(config: Config) -> web.Application:
     app = web.Application(client_max_size=1024**3)
     app[CONFIG] = config
     app[SETTINGS] = SettingsStore(config.data_dir / "settings.json")
-    app[DISPLAY] = Display(config.display_backend, config.display_output)
+    app[DISPLAY] = Display(config.display_backend, config.display_output, config.display_mode)
     app.cleanup_ctx.append(_client_session)
 
     app.router.add_get("/local/health", health)

@@ -173,15 +173,29 @@ cat >/tmp/stub/chromium <<'EOF'
 #!/bin/sh
 printf '%s\n' "$@" >/tmp/xdg-pi/chromium.args
 EOF
-chmod 755 /tmp/stub/chromium
+# wlr-randr as on the 7" screen: lists its output, records the mode change.
+cat >/tmp/stub/wlr-randr <<'EOF'
+#!/bin/sh
+if [ $# -eq 0 ]; then
+  printf 'HDMI-A-1 "MPI7002 (HDMI-A-1)"\n  Enabled: yes\n  Modes:\n    1920x1080 px, 60.000000 Hz (current)\n'
+else
+  printf '%s\n' "$*" >/tmp/xdg-pi/wlr-randr.args
+fi
+EOF
+chmod 755 /tmp/stub/chromium /tmp/stub/wlr-randr
 runuser -u pi -- env PATH="/tmp/stub:$PATH" XDG_RUNTIME_DIR=/tmp/xdg-pi FOT_CHROMIUM_FLAGS="--extra-one --extra-two" \
   bash $PREFIX/deploy/kiosk/kiosk.sh 2>/dev/null
+check_eq "screen set to 1024x600" "--output HDMI-A-1 --custom-mode 1024x600@60Hz" "$(cat /tmp/xdg-pi/wlr-randr.args)"
 args=/tmp/xdg-pi/chromium.args
 check "chromium started in kiosk mode" grep -qx -- --kiosk $args
 check "on Wayland" grep -qx -- --ozone-platform=wayland $args
 check "fresh profile in XDG_RUNTIME_DIR" grep -qx -- --user-data-dir=/tmp/xdg-pi/floppyoctotouch-chromium $args
 check "extra flags from kiosk.env" grep -qx -- --extra-two $args
 check_eq "dashboard URL last" "http://127.0.0.1:8765/?kiosk=1" "$(tail -n1 $args)"
+rm /tmp/xdg-pi/wlr-randr.args
+runuser -u pi -- env PATH="/tmp/stub:$PATH" XDG_RUNTIME_DIR=/tmp/xdg-pi FOT_DISPLAY_MODE=preferred \
+  bash $PREFIX/deploy/kiosk/kiosk.sh 2>/dev/null
+check "FOT_DISPLAY_MODE=preferred keeps the screen's mode" test ! -e /tmp/xdg-pi/wlr-randr.args
 kill "$agent_pid"
 wait "$agent_pid" 2>/dev/null || true
 

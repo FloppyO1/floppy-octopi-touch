@@ -33,6 +33,9 @@ class Config:
     # "wlr-randr" (HDMI output of the cage session) or "none" (only logs, for development).
     display_backend: str = "wlr-randr"
     display_output: str = "HDMI-A-1"
+    # Mode set when the output is switched back on (the 7" screen does not advertise 1024x600);
+    # "preferred" keeps the mode the screen asks for.
+    display_mode: str = "1024x600@60Hz"
     # Restarts the kiosk (cage + Chromium); empty = only log (development).
     kiosk_restart_command: list[str] = field(
         default_factory=lambda: [
@@ -78,6 +81,7 @@ _ENV = {
     "FOT_WEBCAM_URL": "webcam_url",
     "FOT_DISPLAY_BACKEND": "display_backend",
     "FOT_DISPLAY_OUTPUT": "display_output",
+    "FOT_DISPLAY_MODE": "display_mode",
     "FOT_KIOSK_RESTART_COMMAND": "kiosk_restart_command",
     "FOT_DISK_PATH": "disk_path",
 }

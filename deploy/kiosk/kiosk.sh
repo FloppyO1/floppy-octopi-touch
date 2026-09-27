@@ -8,6 +8,20 @@ health_url=${FOT_AGENT_HEALTH_URL:-http://127.0.0.1:8765/local/health}
 
 log() { printf 'floppyoctotouch-kiosk: %s\n' "$*" >&2; }
 
+# The 7" screen only advertises 16:9 modes up to 1920x1080 (its scaler shrinks them), not its own 1024x600,
+# and cage picks the preferred one: ask cage for 1024x600. FOT_DISPLAY_MODE=preferred keeps the screen's mode.
+display_mode=${FOT_DISPLAY_MODE:-1024x600@60Hz}
+if [ "$display_mode" != preferred ]; then
+  output=${FOT_DISPLAY_OUTPUT:-$(wlr-randr 2>/dev/null | awk '/^[^ ]/ { print $1; exit }')}
+  if [ -z "$output" ]; then
+    log "no output found by wlr-randr: keeping the screen's mode"
+  elif wlr-randr --output "$output" --custom-mode "$display_mode"; then
+    log "$output set to $display_mode"
+  else
+    log "cannot set $output to $display_mode (see FOT_DISPLAY_MODE in /etc/floppyoctotouch/kiosk.env)"
+  fi
+fi
+
 # The agent starts in a few seconds; until then the screen stays black (no browser error page).
 tries=0
 until curl -fsS -o /dev/null --max-time 2 "$health_url" 2>/dev/null; do

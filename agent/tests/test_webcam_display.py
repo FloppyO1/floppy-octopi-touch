@@ -97,8 +97,21 @@ async def test_display_wlr_randr_command(make_client, monkeypatch):
     assert (await client.put("/local/display", json={"on": True})).status == 200
     assert calls == [
         ("wlr-randr", "--output", "HDMI-A-2", "--off"),
-        ("wlr-randr", "--output", "HDMI-A-2", "--on"),
+        ("wlr-randr", "--output", "HDMI-A-2", "--on", "--custom-mode", "1024x600@60Hz"),
     ]
+
+
+async def test_display_preferred_mode_is_not_forced(make_client, monkeypatch):
+    calls = []
+
+    async def fake_exec(*args, **kwargs):
+        calls.append(args)
+        return FakeProcess(0)
+
+    monkeypatch.setattr(display_module.asyncio, "create_subprocess_exec", fake_exec)
+    client = await make_client(display_mode="preferred")
+    assert (await client.put("/local/display", json={"on": True})).status == 200
+    assert calls == [("wlr-randr", "--output", "HDMI-A-1", "--on")]
 
 
 async def test_display_failure_keeps_the_state(make_client, monkeypatch):
