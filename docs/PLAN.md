@@ -455,7 +455,7 @@ _Legenda: `[ ]` da fare · `[~]` in corso (interrotta se la trovi a inizio sessi
 - [x] Sessione 7 — Terminale, Macro, Livellamento/Mesh (2026-09-25, v0.7.0)
 - [x] Sessione 8 — Sistema e Impostazioni (2026-09-25, v0.8.0)
 - [x] Sessione 9 — Installazione sul Raspberry (2026-09-25, v0.9.0; interrotta una volta e ripresa lo stesso giorno)
-- [ ] Sessione 10 — Test reale e rifinitura
+- [~] Sessione 10 — Test reale e rifinitura (iniziata 2026-09-25)
 
 ### Note tra sessioni
 _(ogni sessione aggiunge qui decisioni prese, deviazioni dal piano, problemi aperti)_
