@@ -2,7 +2,7 @@
 # FloppyOctoTouch installer for OctoPi 1.1.0 (Raspberry Pi OS Bookworm Lite, arm64 or armhf).
 #
 # Run it from a clone or an extracted release: ./deploy/install.sh (it runs itself through sudo if needed).
-# Every question comes first (API key, display, reboot), then it works on its own until the reboot.
+# Every question comes first (API key, Cancel Objects plugin, display, reboot), then it works on its own.
 # It is idempotent: running it again repairs or reconfigures an installation. See README "Installation".
 set -euo pipefail
 
@@ -28,6 +28,7 @@ Options:
   --skip-display-config  do not touch config.txt / cmdline.txt
   --listen-lan           let the agent listen on every network interface. WARNING: it adds the API key to
                          every request, so anyone on the network gets full control of the printer
+  --no-cancel-plugin     do not offer the Cancel Objects OctoPrint plugin (cancel single objects)
   --update               used by update.sh: keep the configuration, no questions about key and display
   -h, --help             show this help
 EOF
@@ -39,6 +40,7 @@ USER_ARG=''
 OCTOPRINT_URL=''
 SKIP_DISPLAY=0
 LISTEN_LAN=0
+NO_CANCEL_PLUGIN=0
 UPDATE=0
 
 parse_args() {
@@ -54,6 +56,7 @@ parse_args() {
       --octoprint-url=*) OCTOPRINT_URL=${arg#*=} ;;
       --skip-display-config) SKIP_DISPLAY=1 ;;
       --listen-lan) LISTEN_LAN=1 ;;
+      --no-cancel-plugin) NO_CANCEL_PLUGIN=1 ;;
       --update)
         UPDATE=1
         SKIP_DISPLAY=1
@@ -508,6 +511,113 @@ choose_api_key() {
   done
 }
 
+# ------------------------------------------------------------------------------------ Cancel Objects plugin
+OCTOPRINT_PYTHON=''
+CANCEL_PLUGIN_WANTED=0
+CANCEL_PLUGIN_STATE=''
+
+# OctoPrint's own Python, next to the octoprint executable of the unit (/opt/octopi/oprint/bin on OctoPi).
+find_octoprint_python() {
+  local exec bin
+  exec=$({ grep '^ExecStart=' <<<"$OCTOPRINT_UNIT_TEXT" || true; } | tail -n1)
+  exec=${exec#ExecStart=}
+  exec=${exec#[-@+!:]}
+  bin=${exec%% *}
+  if [ -n "$bin" ] && [ -x "$(dirname "$bin")/python" ]; then
+    OCTOPRINT_PYTHON=$(dirname "$bin")/python
+  fi
+}
+
+# Asked with the other questions; updates never touch OctoPrint's plugins.
+plan_cancel_plugin() {
+  local installed key=${API_KEY:-$SAVED_KEY}
+  [ "$UPDATE" = 0 ] || return 0
+  installed=$(cancel_plugin_version "$OCTOPRINT_PYTHON")
+  if [ -n "$installed" ]; then
+    info "Cancel Objects plugin $installed already installed in OctoPrint"
+    CANCEL_PLUGIN_STATE="installed ($installed)"
+    return
+  fi
+  if [ "$NO_CANCEL_PLUGIN" = 1 ]; then
+    CANCEL_PLUGIN_STATE='not installed (--no-cancel-plugin)'
+    return
+  fi
+  if [ -z "$key" ]; then
+    CANCEL_PLUGIN_STATE="not installed (needs the API key: OctoPrint > Plugin Manager > Cancel Objects)"
+    return
+  fi
+  if [ "$NON_INTERACTIVE" = 1 ]; then
+    CANCEL_PLUGIN_WANTED=1
+    return
+  fi
+  info "Optional: the Cancel Objects plugin for OctoPrint lets the dashboard remove single objects from a print."
+  if ask_yes_no "Install the Cancel Objects plugin (OctoPrint restarts if it is not printing)?" y; then
+    CANCEL_PLUGIN_WANTED=1
+  else
+    CANCEL_PLUGIN_STATE='not installed'
+  fi
+}
+
+# Through OctoPrint's Plugin Manager (same as its button), then OctoPrint restarts unless it is printing.
+install_cancel_plugin() {
+  local key=${API_KEY:-$SAVED_KEY} status version='' i result manual="install Cancel Objects from OctoPrint's Plugin Manager"
+  status=$(octoprint_api POST "$OCTOPRINT_URL/api/plugin/pluginmanager" "$key" \
+    "{\"command\": \"install\", \"url\": \"$CANCELOBJECT_URL\"}" | head -n1)
+  case $status in
+    200 | 204) ;;
+    401 | 403)
+      warn "the API key may not install plugins (it must belong to an admin user): $manual"
+      CANCEL_PLUGIN_STATE='not installed (API key without admin rights)'
+      return
+      ;;
+    *)
+      warn "OctoPrint did not accept the plugin installation (HTTP $status): $manual"
+      CANCEL_PLUGIN_STATE='not installed (Plugin Manager error)'
+      return
+      ;;
+  esac
+  info "installing Cancel Objects $CANCELOBJECT_VERSION through OctoPrint's Plugin Manager (it downloads it)"
+  if [ -z "$OCTOPRINT_PYTHON" ]; then
+    warn "cannot find OctoPrint's Python to follow the installation: check OctoPrint > Plugin Manager"
+    CANCEL_PLUGIN_STATE='installation requested (restart OctoPrint when it is done)'
+    return
+  fi
+  for i in $(seq 1 300); do
+    version=$(cancel_plugin_version "$OCTOPRINT_PYTHON")
+    [ -z "$version" ] || break
+    [ $((i % 30)) -eq 0 ] && info "still installing ($i s)"
+    sleep 1
+  done
+  if [ -z "$version" ]; then
+    warn "the plugin did not show up within 5 minutes: check OctoPrint > Plugin Manager"
+    CANCEL_PLUGIN_STATE='not installed (timed out)'
+    return
+  fi
+  CANCEL_PLUGIN_INSTALLED=1
+  ok "Cancel Objects $version installed"
+  result=0
+  restart_octoprint "$OCTOPRINT_URL" "$key" || result=$?
+  case $result in
+    0)
+      ok "OctoPrint restarted: the plugin is active"
+      CANCEL_PLUGIN_STATE="installed ($version)"
+      ;;
+    2)
+      warn "OctoPrint is printing: restart it after the print to load the plugin (sudo systemctl restart octoprint)"
+      CANCEL_PLUGIN_STATE="installed ($version), restart OctoPrint after the print"
+      ;;
+    3)
+      warn "systemd is not running (container?): the plugin loads at the next OctoPrint start"
+      CANCEL_PLUGIN_STATE="installed ($version), loaded at the next OctoPrint start"
+      ;;
+    *)
+      warn "OctoPrint did not come back after the restart: sudo systemctl status octoprint"
+      CANCEL_PLUGIN_STATE="installed ($version), OctoPrint restart failed"
+      ;;
+  esac
+  info "files uploaded before now must be uploaded again to cancel their objects"
+}
+
 DISPLAY_OUTPUT=HDMI-A-1
 
 detect_display_output() {
@@ -714,6 +824,9 @@ write_state() {
     printf 'FOT_USER_SAVED=%q\n' "$FOT_USER"
     printf 'FOT_LISTEN_LAN=%q\n' "$LISTEN_LAN"
     printf 'FOT_CMDLINE_TOKEN=%q\n' "$CMDLINE_TOKEN_ADDED"
+    printf 'FOT_CANCEL_PLUGIN=%q\n' "$CANCEL_PLUGIN_INSTALLED"
+    printf 'FOT_OCTOPRINT_URL=%q\n' "$OCTOPRINT_URL"
+    printf 'FOT_OCTOPRINT_PYTHON=%q\n' "$OCTOPRINT_PYTHON"
   } >"$FOT_STATE"
   chmod 644 "$FOT_STATE"
 }
@@ -784,6 +897,7 @@ summary() {
   info "agent:          ${AGENT_STATE:-installed} (http://127.0.0.1:8765)"
   info "configuration:  $CONFIG_FILE"
   info "kiosk options:  $FOT_KIOSK_ENV"
+  [ -z "$CANCEL_PLUGIN_STATE" ] || info "Cancel Objects: $CANCEL_PLUGIN_STATE"
   info "OctoPrint:      $OCTOPRINT_URL${ip:+ (from a PC: http://$ip/)}"
   info "logs:           journalctl -u $AGENT_UNIT -u $KIOSK_UNIT -b"
   info "update:         git pull in the clone, then ./deploy/install.sh (or floppyoctotouch-update X.tar.gz)"
@@ -821,12 +935,14 @@ main() {
   run_bundled_release "$@"
   load_state
   CMDLINE_TOKEN_ADDED=${FOT_CMDLINE_TOKEN:-}
+  CANCEL_PLUGIN_INSTALLED=${FOT_CANCEL_PLUGIN:-0}
   [ "$UPDATE" = 1 ] && [ "${FOT_LISTEN_LAN:-0}" = 1 ] && LISTEN_LAN=1
   find_payload
 
   step "Checking the system (FloppyOctoTouch $VERSION)"
   check_system
   read_octoprint_unit
+  find_octoprint_python
   choose_user
   check_octoprint
 
@@ -840,6 +956,7 @@ main() {
     warn "--listen-lan: the agent adds the API key to every request, anyone on the network controls the printer"
     ask_yes_no "Listen on the network anyway?" n || LISTEN_LAN=0
   fi
+  plan_cancel_plugin
   detect_display_output
   plan_display
   plan_reboot
@@ -859,6 +976,11 @@ main() {
 
   step "Installing services, kiosk and USB automount"
   install_system_files
+
+  if [ "$CANCEL_PLUGIN_WANTED" = 1 ]; then
+    step "Cancel Objects plugin"
+    install_cancel_plugin
+  fi
 
   if [ "$DISPLAY_WANTED" = 1 ]; then
     step "Display settings"

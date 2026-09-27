@@ -5,6 +5,9 @@
 set -euo pipefail
 
 KEY=floppyoctotouch-deploy-test-key-0123456789
+USER_KEY=floppyoctotouch-deploy-test-user-key-0123  # accepted, but not an admin: no Plugin Manager
+STATE=/etc/floppyoctotouch/install.conf
+PLUGIN=/tmp/fake-cancelobject  # the fake Plugin Manager "installed" Cancel Objects
 PREFIX=/opt/floppyoctotouch
 CONFIG=/home/pi/.config/floppyoctotouch/config.json
 BOOT=/boot/firmware
@@ -97,7 +100,12 @@ ExecStart=/opt/octopi/oprint/bin/octoprint serve --host=${HOST} --port=${PORT}
 WantedBy=multi-user.target
 EOF
 systemctl enable -q getty@tty1.service
-python3 /test/fake_octoprint.py "$KEY" 5001 &
+# OctoPrint's Python on OctoPi (next to the unit's octoprint): knows Cancel Objects once the fake Plugin
+# Manager installed it.
+mkdir -p /opt/octopi/oprint/bin
+printf '#!/bin/sh\n[ -f %s ] && echo 0.6.4\n' "$PLUGIN" >/opt/octopi/oprint/bin/python
+chmod 755 /opt/octopi/oprint/bin/python
+python3 /test/fake_octoprint.py "$KEY" 5001 "$USER_KEY" &
 check "fake OctoPrint on :5001" wait_url "http://127.0.0.1:5001/robots.txt"
 
 section "install.sh --non-interactive --api-key=…"
@@ -151,6 +159,9 @@ check "cmdline.txt is still one line" test "$(wc -l <$BOOT/cmdline.txt)" = 1
 check "boot file backups" bash -c "ls $BOOT/config.txt.floppyoctotouch-*.bak $BOOT/cmdline.txt.floppyoctotouch-*.bak"
 check "update/uninstall commands" test -L /usr/local/bin/floppyoctotouch-update -a -L /usr/local/bin/floppyoctotouch-uninstall
 check "state file" grep -q '^FOT_USER_SAVED=pi$' /etc/floppyoctotouch/install.conf
+check "Cancel Objects installed through the Plugin Manager (non-interactive)" test -f $PLUGIN
+check "state: the installer added the plugin" grep -qx 'FOT_CANCEL_PLUGIN=1' $STATE
+check "state: OctoPrint's Python found from the unit" grep -qx 'FOT_OCTOPRINT_PYTHON=/opt/octopi/oprint/bin/python' $STATE
 
 section "agent with the installed configuration"
 runuser -u pi -- env FOT_CONFIG=$CONFIG $PREFIX/venv/bin/floppyoctotouch-agent >/tmp/agent.log 2>&1 &
@@ -235,6 +246,7 @@ check_eq "config.json mode" "600" "$(stat -c '%a' $CONFIG)"
 check_eq "display block still once" 1 "$(count '# >>> FloppyOctoTouch display >>>' $BOOT/config.txt)"
 check_eq "video= still once" 1 "$(count 'video=HDMI-A-1' $BOOT/cmdline.txt)"
 check_eq "agent still installed" "$version" "$($PREFIX/venv/bin/floppyoctotouch-agent --version)"
+check "plugin already there: still marked as added by the installer" grep -qx 'FOT_CANCEL_PLUGIN=1' $STATE
 
 section "update.sh"
 echo 'FOT_CHROMIUM_FLAGS=--kept-by-update' >>/etc/floppyoctotouch/kiosk.env
@@ -250,6 +262,7 @@ check "kiosk.env kept" grep -qx 'FOT_CHROMIUM_FLAGS=--kept-by-update' /etc/flopp
 check "dashboard settings kept" grep -q '"marker": true' /home/pi/.config/floppyoctotouch/settings.json
 check_eq "API key kept" "$KEY" "$(config_value api_key)"
 check_eq "display block not duplicated" 1 "$(count '# >>> FloppyOctoTouch display >>>' $BOOT/config.txt)"
+check "update keeps the plugin state" grep -qx 'FOT_CANCEL_PLUGIN=1' $STATE
 
 section "uninstall.sh"
 floppyoctotouch-uninstall --non-interactive
@@ -263,6 +276,7 @@ check "commands removed" test ! -e /usr/local/bin/floppyoctotouch-update
 check "config.txt restored" cmp /tmp/config.txt.orig $BOOT/config.txt
 check "cmdline.txt restored" cmp /tmp/cmdline.txt.orig $BOOT/cmdline.txt
 check "configuration kept without --purge" test -f $CONFIG
+check "Cancel Objects kept by a non-interactive uninstall" test -f $PLUGIN
 
 section "install.sh from a git clone (bundled release/ tarball)"
 clone=/tmp/clone
@@ -306,11 +320,13 @@ check "uninstalled" test ! -e $PREFIX -a ! -e /home/pi/.config/floppyoctotouch
 # Interactive runs on a fake terminal: every question must come before apt starts ("Installing packages").
 drive() { python3 /test/drive.py --no-prompt-after "Installing packages" "$@"; }
 
-section "interactive install: key refused, then accepted; Ctrl+C cancels the reboot"
+section "interactive install: key refused, then accepted; plugin; Ctrl+C cancels the reboot"
+rm -f $PLUGIN
 status=0
 drive --transcript /tmp/drive1.log --interrupt-on "Ctrl+C to cancel" --answers "$(printf '%s' \
   '[["API key", "not a key"], ["API key", "wrong-key-0123456789abcdef"], ["API key", " '"$KEY"' "],' \
-  ' ["display settings", ""], ["Reboot automatically", ""]]')" -- bash "$src/deploy/install.sh" || status=$?
+  ' ["Cancel Objects plugin", ""], ["display settings", ""], ["Reboot automatically", ""]]')" \
+  -- bash "$src/deploy/install.sh" || status=$?
 check_eq "installer finished, questions only at the start, user not asked" 0 "$status"
 check "shows where to create the key" grep -q "Settings (wrench icon at the top) > Application Keys" /tmp/drive1.log
 check "bad format asked again" grep -q "does not look like an API key" /tmp/drive1.log
@@ -318,6 +334,8 @@ check "refused key asked again" grep -q "OctoPrint rejected that key" /tmp/drive
 check_eq "accepted key saved (spaces removed)" "$KEY" "$(config_value api_key)"
 check_eq "display settings added (Enter = yes)" 1 "$(count '# >>> FloppyOctoTouch display >>>' $BOOT/config.txt)"
 check "reboot countdown cancelled with Ctrl+C" grep -q "reboot cancelled: starting the dashboard now" /tmp/drive1.log
+check "Cancel Objects installed (Enter = yes)" grep -q "Cancel Objects 0.6.4 installed" /tmp/drive1.log
+check "no OctoPrint restart without systemd" grep -q "loads at the next OctoPrint start" /tmp/drive1.log
 
 section "interactive reinstall: saved key kept without asking, reboot after the countdown"
 status=0
@@ -327,7 +345,15 @@ check_eq "only the reboot question" 0 "$status"
 check "saved key kept" grep -q "still accepted by OctoPrint: kept" /tmp/drive2.log
 check "countdown ran out (no systemd here, so no reboot)" \
   grep -q "systemd is not running (container?): not rebooting" /tmp/drive2.log
-floppyoctotouch-uninstall --non-interactive --purge
+
+section "interactive uninstall: removes the Cancel Objects plugin the installer added"
+status=0
+python3 /test/drive.py --transcript /tmp/drive-uninstall.log --answers "$(printf '%s' \
+  '[["Continue", "y"], ["display settings", "y"], ["Cancel Objects", "y"], ["delete the configuration", "y"]]')" \
+  -- floppyoctotouch-uninstall || status=$?
+check_eq "uninstall finished, questions as expected" 0 "$status"
+check "plugin removed through the Plugin Manager" test ! -e $PLUGIN
+check "configuration deleted on request" test ! -e /home/pi/.config/floppyoctotouch
 
 section "interactive install without a key (Enter): the touch screen asks for it"
 status=0
@@ -338,6 +364,23 @@ check_eq "installer finished" 0 "$status"
 check "warned about the missing key" grep -q "the touch screen asks for it" /tmp/drive3.log
 check_eq "no key in config.json" null "$(config_value api_key)"
 check "display settings declined" cmp /tmp/config.txt.orig $BOOT/config.txt
+check "no key: plugin not offered" bash -c "! grep -q 'Install the Cancel Objects plugin' /tmp/drive3.log"
+floppyoctotouch-uninstall --non-interactive --purge
+
+section "Cancel Objects: key without admin rights, then OctoPrint printing"
+status=0
+bash "$src/deploy/install.sh" --non-interactive --api-key="$USER_KEY" --skip-display-config \
+  >/tmp/plugin-user.log 2>&1 || status=$?
+check_eq "installation goes on without admin rights" 0 "$status"
+check "warned: the key must belong to an admin" grep -q "must belong to an admin user" /tmp/plugin-user.log
+check "plugin not installed" test ! -e $PLUGIN
+check "state: not added by the installer" grep -qx 'FOT_CANCEL_PLUGIN=0' $STATE
+floppyoctotouch-uninstall --non-interactive --purge
+echo Printing >/tmp/fake-job-state
+bash "$src/deploy/install.sh" --non-interactive --api-key="$KEY" --skip-display-config >/tmp/plugin-printing.log 2>&1
+check "installed while printing" test -f $PLUGIN
+check "OctoPrint not restarted during a print" grep -q "restart it after the print" /tmp/plugin-printing.log
+rm -f /tmp/fake-job-state
 floppyoctotouch-uninstall --non-interactive --purge
 
 printf '\n%d passed, %d failed\n' "$PASSED" "$FAILED"

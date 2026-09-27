@@ -181,3 +181,64 @@ remove_cmdline_token() {
   done
   printf '%s\n' "$out" >"$file"
 }
+
+# ------------------------------------------------------------------------ Cancel Objects plugin
+# Optional OctoPrint plugin used by the dashboard to cancel single objects. Installed and removed only
+# through OctoPrint's Plugin Manager API (like its own button), at this verified version.
+CANCELOBJECT_VERSION=0.6.4
+CANCELOBJECT_URL="https://github.com/paukstelis/OctoPrint-Cancelobject/archive/refs/tags/$CANCELOBJECT_VERSION.zip"
+
+# octoprint_api METHOD URL KEY [JSON]: prints the HTTP status (000 = no answer) and, on a second line, the
+# "state" field of a JSON answer (for /api/job). The key goes through the environment, not the command line.
+octoprint_api() {
+  FOT_KEY=${3:-} FOT_BODY=${4:-} python3 - "$1" "$2" <<'PY'
+import json, os, sys, urllib.error, urllib.request
+
+method, url = sys.argv[1], sys.argv[2]
+body = os.environ.get("FOT_BODY") or None
+request = urllib.request.Request(url, data=body.encode() if body else None, method=method)
+if body:
+    request.add_header("Content-Type", "application/json")
+if os.environ.get("FOT_KEY"):
+    request.add_header("X-Api-Key", os.environ["FOT_KEY"])
+status, state = "000", ""
+try:
+    with urllib.request.urlopen(request, timeout=30) as response:
+        status = str(response.status)
+        try:
+            state = str(json.load(response).get("state", ""))
+        except Exception:
+            pass
+except urllib.error.HTTPError as error:
+    status = str(error.code)
+except Exception:
+    pass
+print(status)
+print(state)
+PY
+}
+
+# cancel_plugin_version PYTHON: version installed in OctoPrint's Python ('' = none, or Python unknown).
+cancel_plugin_version() {
+  if [ -z "${1:-}" ] || [ ! -x "$1" ]; then
+    return 0
+  fi
+  "$1" -c 'import importlib.metadata as m; print(m.version("OctoPrint-Cancelobject"))' 2>/dev/null || true
+}
+
+# restart_octoprint URL KEY: 0 = restarted and answering, 1 = failed, 2 = printing (not restarted),
+# 3 = no systemd (container).
+restart_octoprint() {
+  local state i
+  state=$(octoprint_api GET "$1/api/job" "$2" | sed -n 2p)
+  case $state in
+    Printing* | Paused* | Pausing* | Resuming* | Cancelling* | Finishing* | Starting*) return 2 ;;
+  esac
+  systemd_running || return 3
+  systemctl restart octoprint.service || return 1
+  for i in $(seq 1 120); do
+    [ "$(octoprint_api GET "$1/api/version" "$2" | head -n1)" = 200 ] && return 0
+    sleep 1
+  done
+  return 1
+}

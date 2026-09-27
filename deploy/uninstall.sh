@@ -95,6 +95,38 @@ restore_display() {
   DISPLAY_CHANGED=1
 }
 
+# The Cancel Objects plugin goes only if install.sh added it and the user says so (it may be used by
+# OctoPrint's own UI). Before remove_config: the API key is read from the configuration.
+remove_cancel_plugin() {
+  local home key='' status result
+  [ "${FOT_CANCEL_PLUGIN:-0}" = 1 ] || return 0
+  [ -n "$(cancel_plugin_version "${FOT_OCTOPRINT_PYTHON:-}")" ] || return 0
+  if [ "$NON_INTERACTIVE" = 1 ] ||
+    ! ask_yes_no "Also remove the Cancel Objects OctoPrint plugin that the installer added?" n; then
+    info "Cancel Objects plugin kept (OctoPrint > Plugin Manager removes it)"
+    return 0
+  fi
+  home=$(user_home "${FOT_USER_SAVED:-}")
+  if [ -n "$home" ] && [ -f "$home/.config/floppyoctotouch/config.json" ]; then
+    key=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1])).get("api_key", ""))' \
+      "$home/.config/floppyoctotouch/config.json" 2>/dev/null || true)
+  fi
+  status=$(octoprint_api POST "${FOT_OCTOPRINT_URL:-http://127.0.0.1:5000}/api/plugin/pluginmanager" "$key" \
+    '{"command": "uninstall", "plugin": "cancelobject"}' | head -n1)
+  if [ "$status" != 200 ]; then
+    warn "OctoPrint did not remove the plugin (HTTP $status): use OctoPrint > Plugin Manager"
+    return 0
+  fi
+  ok "Cancel Objects plugin removed"
+  result=0
+  restart_octoprint "${FOT_OCTOPRINT_URL:-http://127.0.0.1:5000}" "$key" || result=$?
+  case $result in
+    0) ok "OctoPrint restarted" ;;
+    2) warn "OctoPrint is printing: restart it after the print (sudo systemctl restart octoprint)" ;;
+    *) info "restart OctoPrint to finish: sudo systemctl restart octoprint" ;;
+  esac
+}
+
 remove_config() {
   local home config_dir
   [ -n "${FOT_USER_SAVED:-}" ] || return 0
@@ -130,6 +162,7 @@ main() {
   remove_services
   remove_system_files
   restore_display
+  remove_cancel_plugin
   remove_config
   rm -rf -- "$FOT_PREFIX" "$FOT_ETC"
   ok "$FOT_PREFIX removed"
