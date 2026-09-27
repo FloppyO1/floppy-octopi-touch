@@ -1181,3 +1181,23 @@ _(ogni sessione aggiunge qui decisioni prese, deviazioni dal piano, problemi ape
     / `; stop printing object …`; "Exclude objects" con flavor Marlin → `M486` come PrusaSlicer (`; start printing object,
     unique label id` solo per stampanti Bambu). Consiglio: `OctoPrint comments` finché il firmware non ha `M486`
     (con `Firmware-specific` Marlin risponderebbe "Unknown command" a ogni cambio oggetto), poi `Firmware-specific`.
+- **Punto raggiunto (2026-09-27, sessione sospesa su richiesta dell'utente)** — commit sul branch `session-11`:
+  - fatto: agent `objects.py` + `GET /local/objects` (cache, 11 pytest); frontend `core/objects.ts` (+ test),
+    store `objects.svelte.ts` (messaggi del plugin, `M486` solo dalle righe dal vivo: la cronologia può contenere
+    `M486 P` di una stampa precedente), `ObjectsDialog.svelte` (mappa SVG + elenco + conferma), pulsante
+    "Oggetti n/m" nella riga Pausa/Stop della Home, capability `cancelObjects` (M486, override manuale), i18n en/it;
+    campioni `four-objects_prusaslicer.gcode` e `four-objects-m486_prusaslicer.gcode` (nomi "Firmware-specific" veri:
+    niente `id:N copy M`); `init.sh` installa il plugin 0.6.4 nel dev; smoke test `ONLY=objects` (plugin: oggetto
+    tolto e non più inviato; file mai visto dal plugin → avviso; M486 forzato → `M486 P2`) verde; installer
+    (`--no-cancel-plugin`, domanda con Invio = sì, Plugin Manager API, riavvio solo se non stampa, stato
+    `FOT_CANCEL_PLUGIN`/`FOT_OCTOPRINT_URL`/`FOT_OCTOPRINT_PYTHON`), uninstall che chiede di togliere il plugin solo
+    se l'aveva messo l'installer; deploy-test **122/122**; README aggiornato.
+  - bug trovato e corretto: `M486 A<nome>` con "copy" nel nome veniva letto come `C` (annulla il corrente).
+    Nota: anche Marlin reale potrebbe leggere parole del nome come parametri → consigliare `OctoPrint comments`.
+  - in corso quando ci siamo fermati: smoke test **completo** lanciato in background (esito da ricontrollare:
+    `docker compose -f dev/docker-compose.yml run --rm --no-deps playwright` con `fot-vite` avviato, vedi CLAUDE.md).
+  - da fare: ARCHITECTURE (endpoint, capability, flusso), CHANGELOG (voce "Unreleased"), CLAUDE.md (layout: objects.py,
+    core/objects, store, ObjectsDialog, campioni; gotcha plugin = riscrive al caricamento), verifica sul Pi con la
+    stampante (3-4 oggetti, toglierne uno), poi chiusura dopo la 1.0.0 (merge in `main`, v1.1.0).
+  - Sessione 10 ancora `[~]` su `main`: restano i punti 1-5 della checklist (stampante, SD/M300, host prompt, USB,
+    webcam) e le rifiniture annotate sopra.

@@ -54,6 +54,12 @@ Available now:
   URL, OctoPrint API key (checked by the agent, also from the "connecting" overlay), reset.
 - Big end-of-print / failure / pause notices, with the `M300` beep through the printer's buzzer.
 - Marlin host prompts (`M876`) shown as touch dialogs.
+- Cancel single objects during a print (Home → Objects): a bed map with the objects' outlines and a list, a tap
+  and a confirmation. It works through the [Cancel Objects](https://github.com/paukstelis/OctoPrint-Cancelobject)
+  OctoPrint plugin (the installer offers it) or the firmware's `M486` (Marlin `CANCEL_OBJECTS`, switched on in
+  System → Settings → Firmware). The slicer must label the objects: PrusaSlicer / OrcaSlicer "Label objects" =
+  `OctoPrint comments` (`Firmware-specific` once the firmware has `M486`). Files uploaded before the plugin was
+  installed must be uploaded again: the plugin prepares each file when it is uploaded.
 - English and Italian, fully offline (no CDN, works without Wi-Fi).
 
 Planned:
@@ -211,7 +217,8 @@ the Tatara A8 profile (240 layers, about 45 min, 300×300 PNG thumbnail), handy 
    - **the API key**: paste it (in most SSH terminals: right click or Ctrl+Shift+V) and press Enter. Nothing
      shows while you paste, that is normal. If OctoPrint refuses it, the installer asks again. Pressing Enter
      without a key is fine too: the touch screen asks for it later;
-   - **"Add the display settings?"** and **"Reboot automatically at the end?"**: press Enter.
+   - **"Install the Cancel Objects plugin?"** (it lets the dashboard remove single objects from a print),
+     **"Add the display settings?"** and **"Reboot automatically at the end?"**: press Enter.
 
    Then it works on its own for a few minutes (it downloads Chromium), shows a summary and reboots after a
    10-second countdown (Ctrl+C cancels the reboot and starts the dashboard right away). After the reboot the
@@ -243,6 +250,7 @@ reconfigures the installation and keeps a saved API key that OctoPrint still acc
 | `--octoprint-url=URL` | OctoPrint address (default `http://127.0.0.1:<port>`) |
 | `--skip-display-config` | do not touch `config.txt` / `cmdline.txt` |
 | `--listen-lan` | agent on every interface instead of `127.0.0.1`. **Anyone on the network then controls the printer** (the agent adds the API key to every request) |
+| `--no-cancel-plugin` | do not offer the Cancel Objects OctoPrint plugin (`--non-interactive` installs it otherwise) |
 
 ### Update and uninstall
 
@@ -255,7 +263,9 @@ floppyoctotouch-uninstall                                   # --purge also delet
 Updates keep the API key, the dashboard settings and the kiosk options, and do not touch the display settings;
 `floppyoctotouch-update` refuses a damaged tarball and asks before reinstalling the same version or going back
 (`--force` skips the questions). Uninstalling removes the dashboard services and files, gives tty1 back to the
-login prompt and removes the display lines it added (with a backup); the installed packages stay.
+login prompt and removes the display lines it added (with a backup); the installed packages stay. Updates never
+touch OctoPrint's plugins; uninstalling offers to remove the Cancel Objects plugin only if the installer added it
+(`--non-interactive` keeps it).
 
 ### Troubleshooting
 
@@ -285,7 +295,7 @@ USB mounts: `journalctl -t floppyoctotouch-usb -b`. State: `systemctl status flo
 
 1. checks the system (Bookworm, arm64/armhf) and that OctoPrint answers on `127.0.0.1` (port taken from
    `octoprint.service`); the dashboard runs as the user of `octoprint.service` (normally `pi`);
-2. asks its questions (API key, checked on `/api/version`; display settings; reboot);
+2. asks its questions (API key, checked on `/api/version`; Cancel Objects plugin; display settings; reboot);
 3. installs `cage`, `chromium` (or `chromium-browser`), `python3-venv`, `wlr-randr`, `fonts-dejavu-core`, `curl`;
 4. copies the app to `/opt/floppyoctotouch` and creates the agent's virtual environment there;
 5. writes `~/.config/floppyoctotouch/config.json` with mode 600;
@@ -293,16 +303,18 @@ USB mounts: `journalctl -t floppyoctotouch-usb -b`. State: `systemctl status flo
    restarted if they stop) and disables the login prompt on tty1;
 7. installs a udev rule that mounts USB sticks **read-only** on `/media/usb-<label>` (FAT32, exFAT, NTFS, ext4),
    a sudo rule limited to "eject a stick" and "restart the kiosk", and adds the user to `video`, `render`, `input`;
-8. if accepted, adds the display's 1024×600 mode to `config.txt` and `video=HDMI-A-1:1024x600@60` to
+8. if accepted, installs the Cancel Objects plugin (a fixed, tested version) through OctoPrint's Plugin Manager API,
+   like its own button, and restarts OctoPrint unless it is printing;
+9. if accepted, adds the display's 1024×600 mode to `config.txt` and `video=HDMI-A-1:1024x600@60` to
    `cmdline.txt` (in `/boot/firmware`, with backups);
-9. starts the agent, prints a summary and reboots (or starts the kiosk).
+10. starts the agent, prints a summary and reboots (or starts the kiosk).
 
 | Path | What |
 |---|---|
 | `~/.config/floppyoctotouch/config.json` | agent configuration: API key, OctoPrint URL, webcam URL, USB and display options (mode 600) |
 | `~/.config/floppyoctotouch/settings.json` | dashboard settings (changed from the System screen) |
 | `/etc/floppyoctotouch/kiosk.env` | kiosk page and extra Chromium flags (`sudo systemctl restart floppyoctotouch-kiosk`) |
-| `/etc/floppyoctotouch/install.conf` | what the installer did (user, `cmdline.txt` token), read by update/uninstall |
+| `/etc/floppyoctotouch/install.conf` | what the installer did (user, `cmdline.txt` token, Cancel Objects plugin), read by update/uninstall |
 | `/opt/floppyoctotouch` | app, agent venv, deploy scripts |
 
 More detail in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#deployment-on-the-pi).
