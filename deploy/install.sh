@@ -141,10 +141,38 @@ read_octoprint_unit() {
   fi
 }
 
+# Value of a variable set in the unit (Environment="PORT=5000" or an EnvironmentFile=), the last one wins.
+unit_variable() {
+  local name=$1 value='' line file found
+  while IFS= read -r line; do
+    case $line in
+      Environment=*)
+        found=$({ grep -oE "(^|[\" ])$name=[^\" ]*" <<<"${line#Environment=}" || true; } | tail -n1)
+        [ -z "$found" ] || value=${found#*"$name="}
+        ;;
+      EnvironmentFile=*)
+        file=${line#EnvironmentFile=}
+        file=${file#-}
+        [ -f "$file" ] || continue
+        found=$(sed -n "s/^[[:space:]]*$name=//p" "$file" | tail -n1 | tr -d "\"'")
+        [ -z "$found" ] || value=$found
+        ;;
+    esac
+  done <<<"$OCTOPRINT_UNIT_TEXT"
+  printf '%s\n' "$value"
+}
+
 # Value of an OctoPrint command line option (--port=5000 or --port 5000) in the unit's ExecStart.
+# OctoPi 1.1.0 passes --port=${PORT}: variables are resolved, an unknown one gives an empty value.
 octoprint_option() {
-  { grep '^ExecStart=' <<<"$OCTOPRINT_UNIT_TEXT" || true; } | tail -n1 |
-    sed -n "s/.*--$1[= ]\([^ ]*\).*/\1/p"
+  local value
+  value=$({ grep '^ExecStart=' <<<"$OCTOPRINT_UNIT_TEXT" || true; } | tail -n1 |
+    sed -n "s/.*--$1[= ]\([^ ]*\).*/\1/p")
+  if [[ $value =~ ^\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?$ ]]; then
+    value=$(unit_variable "${BASH_REMATCH[1]}")
+  fi
+  case $value in *'$'*) value='' ;; esac
+  printf '%s\n' "$value"
 }
 
 FOT_USER=''

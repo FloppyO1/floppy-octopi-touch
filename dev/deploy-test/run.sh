@@ -78,22 +78,27 @@ printf 'console=serial0,115200 console=tty1 root=PARTUUID=0123abcd-02 rootfstype
   >"$BOOT/cmdline.txt"
 cp "$BOOT/config.txt" /tmp/config.txt.orig
 cp "$BOOT/cmdline.txt" /tmp/cmdline.txt.orig
+# The unit of OctoPi 1.1.0 (uid and ${PORT} variable), with port 5001 so that a failed lookup (default 5000) fails.
 cat >/etc/systemd/system/octoprint.service <<'EOF'
 [Unit]
 Description=The snappy web interface for your 3D printer
 After=network-online.target
+Wants=network-online.target
 
 [Service]
-Type=exec
+Environment="HOST=127.0.0.1"
+Environment="PORT=5001"
+Environment="REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt"
+Type=simple
 User=1000
-ExecStart=/opt/octopi/oprint/bin/octoprint serve --host=127.0.0.1 --port=5000
+ExecStart=/opt/octopi/oprint/bin/octoprint serve --host=${HOST} --port=${PORT}
 
 [Install]
 WantedBy=multi-user.target
 EOF
 systemctl enable -q getty@tty1.service
-python3 /test/fake_octoprint.py "$KEY" &
-check "fake OctoPrint on :5000" wait_url "http://127.0.0.1:5000/robots.txt"
+python3 /test/fake_octoprint.py "$KEY" 5001 &
+check "fake OctoPrint on :5001" wait_url "http://127.0.0.1:5001/robots.txt"
 
 section "install.sh --non-interactive --api-key=…"
 bash "$src/deploy/install.sh" --non-interactive --api-key="$KEY"
@@ -106,7 +111,7 @@ check_eq "agent in the venv" "$version" "$($PREFIX/venv/bin/floppyoctotouch-agen
 check_eq "config.json mode and owner" "600 pi" "$(stat -c '%a %U' $CONFIG)"
 check_eq "config: api_key" "$KEY" "$(config_value api_key)"
 check_eq "config: host" "127.0.0.1" "$(config_value host)"
-check_eq "config: octoprint_url" "http://127.0.0.1:5000" "$(config_value octoprint_url)"
+check_eq "config: octoprint_url" "http://127.0.0.1:5001" "$(config_value octoprint_url)"
 check_eq "config: uploads_dir" "/home/pi/.octoprint/uploads" "$(config_value uploads_dir)"
 check_eq "config: usb_roots" '["/media/usb-*"]' "$(config_value usb_roots)"
 check_eq "config: usb_eject_command" \
