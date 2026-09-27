@@ -1140,5 +1140,6 @@ _(ogni sessione aggiunge qui decisioni prese, deviazioni dal piano, problemi ape
   in `config.json` (`display_mode`) e la riapplica alla riaccensione dello schermo; `kiosk.sh` chiede all'agent
   (`POST /local/display/mode/apply`) di impostarla all'avvio e ripiega su `wlr-randr` diretto se l'agent non risponde.
   `FOT_DISPLAY_MODE` in kiosk.env vince e blocca l'impostazione. Endpoint `/local/display/modes`, `…/mode` (PUT),
-  `…/mode/keep|revert|apply`. 78 pytest, smoke test (passo system) con prova/ripristino/conferma.
+  `…/mode/keep|revert|apply`. 78 pytest, smoke test (passo system) con prova/ripristino/conferma. **Verificata
+  sul Pi** (ripristino automatico dopo 15 s e conferma ok).
 - Errore di processo: un `python3 --version` lanciato per sbaglio sul PC host (nessun effetto); da non ripetere.
