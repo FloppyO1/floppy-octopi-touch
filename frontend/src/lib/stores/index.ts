@@ -8,6 +8,7 @@ export { idle } from './idle.svelte';
 export { leveling } from './leveling.svelte';
 export { nav } from './nav.svelte';
 export { notices } from './notices.svelte';
+export { objects } from './objects.svelte';
 export { power } from './power.svelte';
 export { job, printer } from './printer.svelte';
 export { prompt } from './prompt.svelte';

@@ -1,5 +1,6 @@
 /** Endpoints served by the FloppyOctoTouch agent itself (`/local/*`). */
 import { getJson, HttpError, postJson, putJson, query } from './http';
+import type { ObjectsReport } from '../core/objects';
 import type { AgentHealth, ApiKeyState, SystemInfo, UsbImportResult, UsbListing, UsbMount } from './types';
 
 export const getAgentHealth = () => getJson<AgentHealth>('/local/health');
@@ -34,6 +35,9 @@ export const getApiKeyState = () => getJson<ApiKeyState>('/local/apikey');
 export const putApiKey = (apiKey: string) => putJson<ApiKeyState>('/local/apikey', { apiKey });
 /** Restarts cage + Chromium; `restarted: false` when no command is configured (development). */
 export const restartKiosk = () => postJson<{ restarted: boolean }>('/local/kiosk/restart', {});
+
+/** Printed objects of a local file and their footprint on the bed (cancel object). */
+export const getObjects = (path: string) => getJson<ObjectsReport>(`/local/objects${query({ path })}`);
 
 /** Thumbnail extracted by the agent from a file of OctoPrint's local storage (404 = none). */
 export const localThumbnailUrl = (path: string, version?: number | null) =>

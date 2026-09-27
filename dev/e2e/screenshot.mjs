@@ -1,7 +1,7 @@
 // Smoke test + screenshots at the target resolution (1024x600).
 // Run with: docker compose -f dev/docker-compose.yml run --rm playwright
 // RECONNECT_TEST=1: also waits for the socket to drop and come back (restart OctoPrint meanwhile).
-import { unlinkSync, writeFileSync } from 'node:fs';
+import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { chromium } from 'playwright';
 
 const BASE_URL = process.env.BASE_URL ?? 'http://frontend:5173';
@@ -465,6 +465,108 @@ async function printFlow(page) {
   await page.waitForSelector('.home[data-view=idle]');
   await api(page, 'DELETE', `/api/files/local/${SMOKE_FILE}`);
   log('print done', `notice shown${DEV ? ', M300 beep sent' : ''}`);
+}
+
+// Cancel single objects through the Cancel Objects plugin (installed in the dev OctoPrint by init.sh).
+// The file goes through the upload API: the plugin only handles files it rewrote when they were uploaded.
+const OBJECTS_FILE = 'smoke-objects.gcode';
+const OBJECTS_SAMPLE = '/samples/four-objects_prusaslicer.gcode';
+const OBJECTS_M486_SAMPLE = '/samples/four-objects-m486_prusaslicer.gcode';
+// Corner where object no. 2 ("Shape-Box id:0 copy 1", 24 mm at 160,60) starts every layer, and object no. 1's.
+const OBJECT_2_MOVE = 'X148.000 Y48.000';
+const OBJECT_1_MOVE = 'X48.000 Y48.000';
+
+async function objectsFlow(page) {
+  await page.goto(`${BASE_URL}/#/home`);
+  await page.waitForSelector('[data-testid=connection-overlay]', { state: 'detached', timeout: 60_000 });
+  const installed = await page.evaluate(async () => 'cancelobject' in ((await (await fetch('/api/settings')).json()).plugins ?? {}));
+  if (!installed) {
+    log('cancel objects', 'skipped: the Cancel Objects plugin is not installed');
+    return;
+  }
+  await waitText(page, 'status-phase', (t) => t.includes('Ready'));
+  await uploadFile(page, OBJECTS_FILE, readFileSync(OBJECTS_SAMPLE, 'utf8'));
+  if ((await api(page, 'POST', `/api/files/local/${OBJECTS_FILE}`, { command: 'select', print: true })) !== 204) {
+    throw new Error('cannot start the objects sample');
+  }
+  await page.getByTestId('job-objects').waitFor({ timeout: 20_000 });
+  await waitText(page, 'job-objects', (t) => t.includes('4/4'));
+  await page.waitForTimeout(600);
+  await page.screenshot({ path: `${OUT}/home-objects.png` });
+  await page.getByTestId('job-objects').click();
+  await page.waitForSelector('[data-testid=objects-dialog]');
+  await page.waitForTimeout(500);
+  await page.screenshot({ path: `${OUT}/objects-dialog.png` });
+
+  await page.getByTestId('object-shape-2').click();
+  await page.waitForSelector('[data-testid=confirm-dialog]');
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: `${OUT}/objects-confirm.png` });
+  await confirmWith(page, 'Remove from the print');
+  await page.getByText('Shape-Box removed from the print').waitFor();
+  await page.waitForFunction(async () => {
+    const response = await fetch('/api/plugin/cancelobject', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ command: 'objlist' }),
+    });
+    return (await response.json()).list.find((o) => o.id === 1)?.cancelled === true;
+  });
+  await page.waitForSelector('[data-testid=object-row-2]:disabled');
+  await page.waitForTimeout(400);
+  await page.screenshot({ path: `${OUT}/objects-cancelled.png` });
+
+  if (DEV) {
+    // The plugin must skip object 2 from now on while objects 1, 3 and 4 go on.
+    const count = (move) =>
+      page.evaluate((m) => window.__fot.terminal.lines.filter((l) => l.text.includes(m)).length, move);
+    const [before2, before1] = [await count(OBJECT_2_MOVE), await count(OBJECT_1_MOVE)];
+    await page.waitForFunction(
+      ([m, n]) => window.__fot.terminal.lines.filter((l) => l.text.includes(m)).length >= n + 2,
+      [OBJECT_1_MOVE, before1],
+      { timeout: 60_000 },
+    );
+    if ((await count(OBJECT_2_MOVE)) > before2) throw new Error('object 2 still printed after it was removed');
+  }
+  await closeModal(page, 'objects-dialog');
+  await waitText(page, 'job-objects', (t) => t.includes('3/4'));
+
+  await api(page, 'POST', '/api/job', { command: 'cancel' });
+  await page.waitForSelector('.home[data-view=idle]', { timeout: 30_000 });
+  await api(page, 'DELETE', `/api/files/local/${OBJECTS_FILE}`);
+  log('cancel objects', `map + list, no. 2 removed through the plugin${DEV ? ' and no longer sent' : ''}, 3/4 left`);
+
+  // A sample copied into the uploads by init.sh was never rewritten by the plugin: upload it again.
+  await api(page, 'POST', '/api/files/local/four-objects_prusaslicer.gcode', { command: 'select', print: true });
+  await page.getByTestId('job-objects').click({ timeout: 20_000 });
+  await page.waitForSelector('[data-testid=objects-needs-upload]');
+  await page.waitForTimeout(400);
+  await page.screenshot({ path: `${OUT}/objects-needs-upload.png` });
+  await closeModal(page, 'objects-dialog');
+  await api(page, 'POST', '/api/job', { command: 'cancel' });
+  await page.waitForSelector('.home[data-view=idle]', { timeout: 30_000 });
+  log('objects upload', 'file never seen by the plugin: "upload it again" hint');
+
+  // Firmware M486 (forced: the Virtual Printer has no CANCEL_OBJECTS): M486 P<n> instead of the plugin.
+  await setOverrides(page, { cancelObjects: 'on' });
+  await page.reload();
+  await page.waitForSelector('[data-testid=connection-overlay]', { state: 'detached', timeout: 60_000 });
+  await uploadFile(page, OBJECTS_FILE, readFileSync(OBJECTS_M486_SAMPLE, 'utf8'));
+  await api(page, 'POST', `/api/files/local/${OBJECTS_FILE}`, { command: 'select', print: true });
+  await page.getByTestId('job-objects').click({ timeout: 20_000 });
+  await page.getByText('Removed by: firmware (M486)').waitFor();
+  await page.getByTestId('object-row-3').click();
+  await confirmWith(page, 'Remove from the print');
+  await page.waitForSelector('[data-testid=object-row-3]:disabled');
+  if (DEV) await terminalHas(page, 'M486 P2');
+  await closeModal(page, 'objects-dialog');
+  await api(page, 'POST', '/api/job', { command: 'cancel' });
+  await page.waitForSelector('.home[data-view=idle]', { timeout: 30_000 });
+  await api(page, 'DELETE', `/api/files/local/${OBJECTS_FILE}`);
+  await setOverrides(page, { cancelObjects: 'auto' });
+  await page.reload();
+  await page.waitForSelector('[data-testid=connection-overlay]', { state: 'detached', timeout: 60_000 });
+  log('objects m486', `capability forced on: no. 3 removed${DEV ? ' with M486 P2' : ''}`);
 }
 
 // Screensaver after the timeout; the wake-up tap must not press the button underneath.
@@ -1217,6 +1319,7 @@ try {
     ['leveling', levelingScreen, true],
     ['system', systemScreen, true],
     ['print', printFlow, true],
+    ['objects', objectsFlow, true],
     ['screensaver', screensaver, DEV],
     ['kiosk', kiosk, true],
     ['gallery', gallery, DEV],

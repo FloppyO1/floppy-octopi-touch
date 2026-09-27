@@ -1,6 +1,7 @@
 <script lang="ts">
   // Home while a job exists: preview, progress and times, live overrides, pause/resume/stop.
   import Activity from '@lucide/svelte/icons/activity';
+  import Boxes from '@lucide/svelte/icons/boxes';
   import Gauge from '@lucide/svelte/icons/gauge';
   import Pause from '@lucide/svelte/icons/pause';
   import Play from '@lucide/svelte/icons/play';
@@ -9,14 +10,21 @@
   import Waves from '@lucide/svelte/icons/waves';
   import { formatClock, formatDuration } from '../../lib/core/format';
   import { t } from '../../lib/i18n/index.svelte';
-  import { files, job, printer, settings, tune } from '../../lib/stores';
+  import { remaining } from '../../lib/core/objects';
+  import { files, job, objects, printer, settings, tune } from '../../lib/stores';
   import Button from '../../lib/ui/Button.svelte';
   import Card from '../../lib/ui/Card.svelte';
   import { askFeedrate, askFlow, pausePrint, resumePrint, stopPrint } from './actions';
+  import ObjectsDialog from './ObjectsDialog.svelte';
   import Preview from './Preview.svelte';
   import StatusRows from './StatusRows.svelte';
 
   const paused = $derived(printer.phase === 'paused' || printer.phase === 'pausing');
+
+  // Cancel single objects (plugin or M486): the button shows how many are still printed.
+  $effect(() => objects.sync(job.file));
+  const showObjects = $derived(printer.busy && (objects.cancellable || objects.needsUpload));
+  let objectsOpen = $state(false);
 </script>
 
 <div class="bottom">
@@ -42,6 +50,11 @@
       </div>
     </div>
     <div class="actions">
+      {#if showObjects}
+        <Button size="lg" icon={Boxes} onclick={() => (objectsOpen = true)} data-testid="job-objects" class="objects">
+          {t('objects.button')}<b class="tabular">{remaining(objects.list)}/{objects.list.length}</b>
+        </Button>
+      {/if}
       {#if paused}
         <Button variant="primary" size="lg" icon={Play} disabled={printer.phase !== 'paused'} onclick={resumePrint} data-testid="job-resume">
           {t('job.resume')}
@@ -61,6 +74,10 @@
     <StatusRows />
   </Card>
 </div>
+
+{#if objectsOpen}
+  <ObjectsDialog onclose={() => (objectsOpen = false)} />
+{/if}
 
 <style>
   .bottom {
@@ -141,5 +158,15 @@
   }
   .actions :global(.btn) {
     flex: 1;
+  }
+  .actions :global(.btn.objects) {
+    flex: 0 0 auto;
+  }
+  .actions :global(.btn.objects .label) {
+    display: flex;
+    gap: var(--sp-2);
+  }
+  .actions :global(.btn.objects b) {
+    color: var(--accent-strong);
   }
 </style>

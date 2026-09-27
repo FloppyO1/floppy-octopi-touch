@@ -15,6 +15,7 @@ import { connection } from './connection.svelte';
 import { events } from './events.svelte';
 import { files } from './files.svelte';
 import { notices } from './notices.svelte';
+import { objects } from './objects.svelte';
 import { power } from './power.svelte';
 import { leveling } from './leveling.svelte';
 import { job, printer } from './printer.svelte';
@@ -56,6 +57,9 @@ function handleEvent({ type, payload }: EventPayload): void {
       printer.setPosition(null);
       void connection.refresh();
       break;
+    case 'PrintStarted':
+      objects.reset();
+      break;
     case 'FirmwareData':
       capabilities.setFirmwareName((payload?.name as string | undefined) ?? null);
       break;
@@ -89,6 +93,8 @@ function handleCurrent(current: CurrentPayload, isHistory: boolean): void {
   tune.ingest(current.logs);
   printer.ingestLog(current.logs);
   leveling.ingest(current.logs, !isHistory);
+  // Not from `history`: its lines may belong to an earlier job (a stale M486 P would hide a live object).
+  if (!isHistory) objects.ingestLog(current.logs);
   capabilities.ingest(current.logs);
   if (printer.operational && !capabilities.known) void capabilities.requestIfUnknown();
 }
@@ -110,6 +116,7 @@ function handleMessage(type: string, payload: unknown): void {
     case 'plugin': {
       const { plugin, data } = payload as PluginPayload;
       server.setPluginMessage(plugin, data);
+      objects.ingestPlugin(plugin, data);
       break;
     }
   }

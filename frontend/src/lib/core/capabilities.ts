@@ -1,6 +1,6 @@
 /**
  * Firmware capabilities: Marlin's M115 report (`Cap:NAME:0|1`) plus manual overrides for features
- * that M115 does not expose (M600, M701/M702, manual mesh bed leveling).
+ * that M115 does not expose (M600, M701/M702, manual mesh bed leveling, M486 cancel objects).
  */
 
 /** Dashboard feature → Marlin capability name (`null` = not reported by M115, manual only). */
@@ -18,6 +18,7 @@ export const CAPABILITIES = {
   advancedPause: null, // M600
   filamentLoadUnload: null, // M701 / M702
   manualMesh: null, // G29 with MESH_BED_LEVELING (G29 S1/S2)
+  cancelObjects: null, // M486 (CANCEL_OBJECTS)
 } as const;
 
 export type CapabilityKey = keyof typeof CAPABILITIES;

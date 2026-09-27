@@ -48,6 +48,7 @@ export const PLUGIN_IDS = {
   displayLayerProgress: 'DisplayLayerProgress',
   actionCommandPrompt: 'action_command_prompt',
   actionCommandNotification: 'action_command_notification',
+  cancelObjects: 'cancelobject',
 } as const;
 
 export type PluginKey = keyof typeof PLUGIN_IDS;

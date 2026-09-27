@@ -158,6 +158,7 @@ services:
       - ./screenshots:/screenshots
       # Writable here: the smoke test puts a file on the fake USB stick and removes it again.
       - ./fake-usb:/fake-usb
+      - ./sample-gcode:/samples:ro
     command: sh -c "npm install --no-audit --prefer-offline && node screenshot.mjs"
 
   # Release tarball for the Pi: release/floppyoctotouch-<version>.tar.gz (+ .sha256).

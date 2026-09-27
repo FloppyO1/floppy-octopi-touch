@@ -66,6 +66,19 @@ if [ -e /samples/calibration-cube_prusaslicer.gcode ] && [ ! -e "$BASE/virtualSd
   echo "init: added sd-cube.gcode to the virtual SD card"
 fi
 
+# Cancel Objects plugin, the same pinned version install.sh offers on the Pi. It lands in the volume
+# (PYTHONUSERBASE=/octoprint/plugins). Samples copied above bypass its upload rewrite on purpose: they show
+# the "upload it again" hint; the smoke test uploads its file through the API.
+CANCELOBJECT_VERSION=0.6.4
+if ! python -c "import importlib.metadata as m, sys; sys.exit(m.version('OctoPrint-Cancelobject') != '$CANCELOBJECT_VERSION')" 2>/dev/null; then
+  if pip install --user --no-cache-dir --quiet --disable-pip-version-check \
+    "https://github.com/paukstelis/OctoPrint-Cancelobject/archive/refs/tags/$CANCELOBJECT_VERSION.zip"; then
+    echo "init: installed the Cancel Objects plugin $CANCELOBJECT_VERSION"
+  else
+    echo "init: WARNING: cannot install the Cancel Objects plugin (offline?)"
+  fi
+fi
+
 if ! octoprint --basedir "$BASE" user list 2>/dev/null | grep -q "$USERNAME"; then
   octoprint --basedir "$BASE" user add --password "$PASSWORD" --admin "$USERNAME"
   echo "init: created admin user '$USERNAME'"

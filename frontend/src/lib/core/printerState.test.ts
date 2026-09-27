@@ -50,6 +50,7 @@ describe('detectPlugins', () => {
       displayLayerProgress: true,
       actionCommandPrompt: true,
       actionCommandNotification: false,
+      cancelObjects: false,
     });
     expect(Object.values(detectPlugins(null)).some(Boolean)).toBe(false);
   });
