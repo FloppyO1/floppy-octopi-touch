@@ -1148,6 +1148,31 @@ _(ogni sessione aggiunge qui decisioni prese, deviazioni dal piano, problemi ape
   alla prima modalità dell'elenco (800×450). Corretto: `--on`, poi la modalità in un secondo comando (anche
   `--preferred`); il frontend ritenta la riaccensione fino a 3 volte. **Verificato sul Pi: ok.**
 - Errore di processo: un `python3 --version` lanciato per sbaglio sul PC host (nessun effetto); da non ripetere.
+  Ripetuto il 2026-09-27 (un `python3 -` rimasto in attesa di input, fermato senza aver eseguito nulla).
+- **Bug: schermata "Something went wrong" di Chromium dopo ~2 h acceso** (2026-09-27). È la pagina di Chromium per un
+  renderer morto (non dell'app): il browser resta vivo, systemd non riavvia nulla. `journalctl -k`: l'**OOM killer**
+  ha ucciso due processi di Chromium con **6,7 GB liberi**. Causa: OctoPi usa il **kernel a 32 bit** (`arm_64bit=0`
+  alla riga 1 di `config.txt`, `uname -m` = `armv7l`) su un Pi 4 da 8 GB: lowmem ~768 MB, di cui 512 MB di CMA (quasi
+  tutta libera), e un'allocazione `GFP_KERNEL` per un buffer TCP (l'agent che inviava ~35 KB, forse un fotogramma della
+  webcam) non trovava più memoria bassa. Monitor di 23 min da fermo (senza webcam): `LowFree`, slab, TCP stabili.
+  - Corretto: **watchdog del kiosk** nell'agent (`watchdog.py`, `kiosk_watchdog_s` = 60, `FOT_KIOSK_WATCHDOG_S`): la
+    pagina del kiosk tiene sempre aperto `/local/events`; se l'ultima connessione da loopback si chiude e nessuna torna
+    entro 60 s, esegue `kiosk_restart_command` una volta (poi aspetta una nuova pagina: niente cicli). Attivo sul Pi
+    senza modifiche all'installer (comando e regola sudo ci sono già); nel dev è spento (`FOT_KIOSK_RESTART_COMMAND: none`).
+  - Consigliato all'utente: `arm_64bit=1` (kernel a 64 bit, userland invariato; `kernel8.img` presente, controllare i
+    moduli `-v8` in `/lib/modules`). **Da verificare** l'esito; poi valutare un avviso dell'installer per kernel a
+    32 bit su Pi con più di ~3 GB.
+  - Ancora da fare: monitor con la **webcam attiva** (screensaver spento) per escludere una perdita nel suo percorso.
+- **Bug: la webcam ogni tanto si blocca e non trasmette più** (segnalato dall'utente). Provato in Playwright (Chromium
+  153): con un `<img>` MJPEG Chromium lancia `load` al primo fotogramma e **poi nessun evento**, né se lo stream finisce,
+  né se la connessione cade (solo `naturalWidth` torna 0), né se si blocca; l'app ritentava solo su `error`, quindi un
+  `mjpg_streamer` riavviato o bloccato lasciava l'ultimo fotogramma per sempre. Corretto: il proxy `/webcam` taglia la
+  connessione (invece di chiuderla pulita) quando lo stream finisce, fallisce o resta muto 10 s (`sock_read`);
+  `WebcamView` controlla ogni 2 s `naturalWidth` (0 → si ricollega subito) e il primo fotogramma (niente in 15 s →
+  errore, nuovo tentativo dopo 10 s). Verificato nel dev con la build servita dall'agent (`restart` e `pause` del
+  container `webcam`: si ricollega in 2 s; bloccata → "non raggiungibile" → riparte da sola). Il proxy di Vite
+  nasconde il taglio (lo chiude pulito): nel dev va provato con `BASE_URL=http://agent:8765`. 98 pytest, 150 vitest,
+  smoke test `print,objects,kiosk` sulla build dell'agent ok. **Da verificare sul Pi.**
 - Deciso con l'utente (2026-09-27): la **Sessione 11 parte subito sul branch `session-11`**, mentre la 10 resta `[~]`
   su `main` per i test con la stampante. Sul branch niente bump né tag; dopo la chiusura della 10 (v1.0.0 su `main`)
   il branch si unisce a `main` e si chiude la 11 con v1.1.0. Le correzioni della 10 passano nel branch con un merge.

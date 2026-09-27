@@ -23,6 +23,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `M486`), smoke test and installer test steps for both paths.
 
 ### Fixed
+- Kiosk: when Chromium's page crashes (seen on the Pi: its renderer killed by the kernel's OOM killer) the agent
+  notices that the page's event stream is gone and restarts the kiosk after 60 s (`kiosk_watchdog_s`), instead of
+  leaving the "Something went wrong" page on screen.
+- Webcam: a stream that ended (streamer restarted) or went silent froze on its last frame forever. The agent now
+  cuts such streams (10 s without data) and the preview reconnects by itself.
 - Smoke test: the move step no longer depends on a Virtual Printer race that sometimes ran a jog as an absolute
   move.
 

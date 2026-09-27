@@ -65,6 +65,7 @@ docker compose -f dev/docker-compose.yml down -v             # wipe OctoPrint/ag
 agent/floppyoctotouch_agent/   config.py, proxy.py (OctoPrint + /webcam), display.py (wlr-randr), settings.py, app.py,
                                commands.py (run_command for external programs), system.py (/proc, /sys, nmcli),
                                control.py (/local/system, /local/apikey, /local/kiosk/restart),
+                               watchdog.py (restarts the kiosk when its page is gone),
                                thumbnails.py (G-code thumbnails + disk cache), usb.py (sticks, import, watcher),
                                files.py (/local/thumbnail, /local/objects, /local/usb*, /local/events SSE),
                                objects.py (labelled objects of a G-code file + footprint, disk cache),
@@ -166,6 +167,13 @@ dev/deploy-test/               installer test on Debian bookworm (run.sh, fake_o
   (`core/tune.ts`). The Virtual Printer prints the samples in about a minute and supports `G4` dwells.
 - An `<img>` with `height: 100%` inside an auto-sized grid row ignores the height: position it absolutely
   (see `WebcamView`).
+- MJPEG in Chromium: `load` fires at the first frame, then nothing, whether the stream ends, breaks or stalls;
+  only a cut connection shows (`naturalWidth` 0). The agent cuts ended/silent webcam streams and `WebcamView`
+  polls `naturalWidth`. Vite's dev proxy turns the cut into a clean end: test webcam recovery against the agent
+  build (`BASE_URL=http://agent:8765`), e.g. with `docker compose … restart webcam` / `pause webcam`.
+- The Pi 4 with 8 GB under OctoPi runs a 32-bit kernel (`arm_64bit=0`): only ~768 MB of lowmem, 512 MB of it CMA,
+  so the kernel can hit the OOM killer with GBs free (it killed Chromium's renderer). The kiosk watchdog
+  (`kiosk_watchdog_s`) restarts the kiosk; `arm_64bit=1` (64-bit kernel, 32-bit userland) removes the limit.
 - Files copied into OctoPrint's uploads while it runs (e.g. by `init.sh` after a sample changed) are not analysed
   until a restart, and `init.sh` never overwrites: replace a sample by deleting it and uploading it through
   `/api/files/local` (then OctoPrint analyses it at once).
