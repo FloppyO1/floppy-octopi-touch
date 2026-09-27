@@ -105,7 +105,8 @@ dev/fake-webcam/server.py      MJPEG test pattern (ffmpeg testsrc) on :8080, ser
 deploy/                        install.sh, update.sh, uninstall.sh, lib/common.sh, systemd/*.service.in, pam/, udev/,
                                sudoers/, kiosk/ (kiosk.sh + kiosk.env), usb/usb-mount.sh (udev + systemd-mount)
 scripts/build-release.sh       release tarball (service `release`) -> release/ (only the latest, committed)
-dev/deploy-test/               installer test on Debian bookworm (run.sh, fake_octoprint.py; service `deploy-test`)
+dev/deploy-test/               installer test on Debian bookworm (run.sh, fake_octoprint.py, drive.py = answers the
+                               questions on a fake terminal; service `deploy-test`)
 ```
 
 ## Gotchas
@@ -191,14 +192,19 @@ dev/deploy-test/               installer test on Debian bookworm (run.sh, fake_o
   started (cage, logind, udev and wlr-randr are only verifiable on the Pi).
 - Shell scripts that source `deploy/lib/common.sh` use `# shellcheck source=SCRIPTDIR/lib/common.sh` (shellcheck
   runs from the repo root with `-x`).
+- Installer questions: only through `ask_*` in `common.sh` (they print to `/dev/tty` and end with `] ` or `: `, which
+  is how `dev/deploy-test/drive.py` spots them) and only before `==> Installing packages` (the test fails otherwise).
+  A new question means new `--answers` entries in `dev/deploy-test/run.sh`. The scripts re-exec themselves with
+  `sudo` (`ensure_root`), so parse the arguments before calling it.
 
 ## Current state
 
-v0.9.0 (session 9): Pi installer (`deploy/install.sh`, idempotent; from a clone it installs the tarball in
-`release/`), agent + kiosk systemd units (cage + Chromium on tty1 via a PAM/logind session), read-only USB automount
-(udev + `systemd-mount` on `/media/usb-<label>`), sudo rule for eject/kiosk restart, optional display lines in
-`config.txt`/`cmdline.txt`, `floppyoctotouch-update`/`-uninstall`, release build and a bookworm installer test.
-Not yet run on a real Pi. Before: every screen (sessions 3-8, System/settings in 8). Next: session 9b (one-command
-install: self-elevation, API key pasted by hand as the first question, everything else automatic), then session 10 (real Pi
-checklist and polish).
+v0.9.1 (session 9b): one-command install on the Pi (`git clone` + `./deploy/install.sh`): the scripts re-exec
+themselves through sudo, every question comes first (API key pasted by hand, asked again until OctoPrint accepts it;
+display; reboot), then it runs unattended and reboots after a cancellable 10 s countdown. v0.9.0 (session 9): the
+installer itself (idempotent; from a clone it installs the tarball in `release/`), agent + kiosk systemd units (cage +
+Chromium on tty1 via a PAM/logind session), read-only USB automount (udev + `systemd-mount` on `/media/usb-<label>`),
+sudo rule for eject/kiosk restart, optional display lines in `config.txt`/`cmdline.txt`,
+`floppyoctotouch-update`/`-uninstall`, release build and a bookworm installer test (100 checks). Not yet run on a real
+Pi. Before: every screen (sessions 3-8). Next: session 10 (real Pi checklist and polish).
 See `docs/PLAN.md` for details and notes between sessions.

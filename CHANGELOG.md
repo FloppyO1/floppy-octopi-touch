@@ -6,6 +6,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-09-27
+
+### Added
+- `install.sh`, `update.sh` and `uninstall.sh` run themselves again through `sudo` when started without root,
+  with `bash`, so `./deploy/install.sh` and `bash deploy/install.sh` (executable bit lost) both work.
+- The installer shows where to create the API key with the Pi's real address, and reboots after a 10-second
+  countdown that Ctrl+C cancels (the dashboard then starts right away).
+- Installer test: self-elevation from a normal user, installer without its executable bit, and interactive runs on
+  a fake terminal (`dev/deploy-test/drive.py`) that fail on any question asked after apt starts (100 checks).
+- `agent-test` also lints the Python helpers of the installer test.
+
+### Changed
+- Every installer question comes first, before apt and pip: the API key (first question), the display settings
+  and "reboot at the end"; then it runs unattended. The user of `octoprint.service` is taken without asking.
+- API key prompt: asked again without limit when OctoPrint refuses it; saved unchecked when OctoPrint does not
+  answer; a saved key that still works is kept without asking (change it with `--api-key=` or on the touch
+  screen). The installer waits up to 10 s for OctoPrint to answer.
+- README: the Raspberry Pi installation starts with a short step-by-step guide; options, update, uninstall,
+  troubleshooting and "What the installer does" follow.
+
 ## [0.9.0] - 2026-09-25
 
 ### Added

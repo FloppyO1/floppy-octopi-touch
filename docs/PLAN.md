@@ -500,7 +500,7 @@ _Legenda: `[ ]` da fare · `[~]` in corso (interrotta se la trovi a inizio sessi
 - [x] Sessione 7 — Terminale, Macro, Livellamento/Mesh (2026-09-25, v0.7.0)
 - [x] Sessione 8 — Sistema e Impostazioni (2026-09-25, v0.8.0)
 - [x] Sessione 9 — Installazione sul Raspberry (2026-09-25, v0.9.0; interrotta una volta e ripresa lo stesso giorno)
-- [~] Sessione 9b — Installazione in un solo comando (aggiunta 2026-09-27, iniziata 2026-09-27)
+- [x] Sessione 9b — Installazione in un solo comando (2026-09-27, v0.9.1)
 - [ ] Sessione 10 — Test reale e rifinitura (segnata `[~]` il 2026-09-25 senza lavoro fatto, rimessa `[ ]` per fare prima la 9b)
 
 ### Note tra sessioni
@@ -988,3 +988,46 @@ _(ogni sessione aggiunge qui decisioni prese, deviazioni dal piano, problemi ape
 - Comandi utili: `docker compose -f dev/docker-compose.yml run --rm release` poi `… run --rm deploy-test`;
   sul Pi: `journalctl -u floppyoctotouch-agent -u floppyoctotouch-kiosk -b`, `journalctl -t floppyoctotouch-usb -b`,
   `sudo systemctl restart floppyoctotouch-kiosk`.
+
+**Sessione 9b — Installazione in un solo comando (2026-09-27, v0.9.1)**
+- Fatto: `ensure_root` in `deploy/lib/common.sh` (se non root → `exec sudo -- bash <script> <argomenti>`, `sudo -n`
+  con `--non-interactive`, errore chiaro senza sudo) usato da install/update/uninstall, quindi funzionano sia
+  `./deploy/install.sh` sia `bash deploy/install.sh` senza bit eseguibile. `install.sh` riorganizzato: controlli →
+  "Setup" con **tutte le domande** (API key per prima, eventuale conferma `--listen-lan`, display con Invio = sì,
+  "riavvia alla fine" con Invio = sì solo se si aggiungono le impostazioni del display) → "No more questions" → apt,
+  pip, file, servizi → riepilogo (ora con la key `…xxxx`) → conto alla rovescia di 10 s annullabile con Ctrl+C
+  (`countdown` in `common.sh`, `trap` su SIGINT; se annullato parte subito il kiosk).
+- API key: istruzioni con l'IP reale del Pi e `http://<hostname>.local/`, input nascosto, spazi rimossi, formato
+  controllato, validazione su `/api/version` (200 = ok, 401/403 = richiesta di nuovo senza limite, nessuna risposta
+  = salvata senza verifica), Invio a vuoto = dal touch; una key salvata ancora valida viene tenuta senza chiedere.
+  L'utente di `octoprint.service` è preso senza domanda (chiesto solo se il servizio manca). L'installer aspetta
+  fino a 10 s che OctoPrint risponda (Pi appena avviato).
+- Test: nuovo `dev/deploy-test/drive.py` (terminale finto con `pty.fork`: risponde alle domande in ordine con
+  regex + risposta, fallisce se una domanda compare dopo "Installing packages", se è inattesa o se avanzano risposte;
+  può mandare Ctrl+C). Nuove sezioni del deploy-test: auto-elevazione da `pi` (sudo senza password come su OctoPi)
+  con `bash` e installer senza bit eseguibile, update/uninstall lanciati da `pi`; installazione interattiva con key
+  in formato errato → rifiutata → accettata (con spazi), display e riavvio con Invio, conto alla rovescia annullato;
+  reinstallazione con sola domanda del riavvio (key tenuta) e conto alla rovescia completato; key vuota.
+  **100 controlli verdi** (erano 77), shellcheck pulito, 70 pytest, 138 vitest. `agent-test` ora passa ruff anche
+  su `dev/deploy-test/*.py` (con le regole dell'agent). Tarball `release/floppyoctotouch-0.9.1.tar.gz` rigenerato;
+  `install.sh` resta 100755 nel repo e `-rwxr-xr-x` nel tarball (controllato dal test).
+- README: sezione "Installation on the Raspberry Pi" riscritta con guida rapida in 4 passi (prerequisiti, key in
+  OctoPrint, comandi da copiare, cosa chiede l'installer); poi installazione senza git (cartella copiata o tarball),
+  opzioni, aggiornamento/disinstallazione (senza `sudo`), troubleshooting e in fondo "What the installer does" +
+  file sul Pi. ARCHITECTURE aggiornata (righe root/questions/start, deploy-test).
+- Decisioni:
+  - **git è già in OctoPi** (verificato nello `start_chroot_script` del modulo octopi, che installa `git`): nel README
+    `sudo apt install -y git` solo come nota se manca. L'URL del clone resta il segnaposto `github.com/FloppyO1/…`.
+  - Le domande "Continue anyway?" (sistema non bookworm, OctoPrint che non risponde) restano: fanno parte dei
+    controlli preliminari e vengono comunque prima di apt.
+  - Senza systemd (container) il conto alla rovescia gira lo stesso e poi avvisa "not rebooting": così il test lo copre.
+  - Con `--non-interactive` nessun riavvio automatico (come prima: solo il suggerimento se il display è cambiato).
+- Deviazioni / scoperte: riga della tabella rischi (sezione 5) unita per errore a quella dopo nella modifica al piano
+  del 2026-09-27: sistemata e committata insieme alla 9b nel piano. Docker Desktop era spento: avviato dalla sessione.
+- Errore di processo: due comandi lanciati per sbaglio con il Python dell'host (un `python -` senza input e un
+  `python3 --version`), nessun effetto; da non ripetere.
+- Problemi aperti / da verificare sul Pi (S10): prompt di sudo con password se l'utente non è quello di default,
+  incolla della key nel terminale SSH (Windows Terminal/PuTTY), Ctrl+C durante il conto alla rovescia sul Pi vero,
+  più tutto l'elenco della Sessione 9.
+- Comandi utili: `docker compose -f dev/docker-compose.yml run --rm release` poi `… run --rm deploy-test`; i
+  transcript delle esecuzioni interattive sono in `/tmp/drive*.log` nel container (stampati anche nel log del test).

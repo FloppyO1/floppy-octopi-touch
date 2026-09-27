@@ -327,19 +327,22 @@ wheel from a clean copy, then packs `floppyoctotouch-<version>/` = `frontend/` (
 `gzip -n`) with a `.sha256`. Only the latest one is kept in `release/`, which is committed: a `git clone` is
 ready to install.
 
-`deploy/install.sh` (bash, `set -euo pipefail`, helpers in `deploy/lib/common.sh`; prompts read `/dev/tty`):
+`deploy/install.sh` (bash, `set -euo pipefail`, helpers in `deploy/lib/common.sh`; prompts read `/dev/tty`).
+All questions come first, before apt and pip; after "No more questions" it runs unattended until the reboot:
 
 | Step | Detail |
 |---|---|
+| root | not root → `exec sudo -- bash <script> <args>` (`sudo -n` with `--non-interactive`; `ensure_root` in `common.sh`, also used by update/uninstall), so `./deploy/install.sh` and `bash deploy/install.sh` (executable bit lost) both work |
 | payload | release layout (`VERSION`, `frontend/index.html`, wheel) or a checkout with `frontend/dist`; a plain clone runs the bundled `release/*.tar.gz` instead (checksum, extracted to a temp dir, same options) |
-| checks | bookworm, arm64/armhf (other architectures only warn: test containers), `octoprint.service` read with `systemctl cat` or from the unit files: `User=`, `--port`, `--basedir` (→ `uploads_dir`) |
+| checks | bookworm, arm64/armhf (other architectures only warn: test containers), `octoprint.service` read with `systemctl cat` or from the unit files: `User=` (taken without asking; asked only when there is no unit), `--port`, `--basedir` (→ `uploads_dir`); OctoPrint's `/api/version` polled for up to 10 s |
+| questions | API key first (instructions with the Pi's real address; hidden input, whitespace stripped, format `[A-Za-z0-9_-]{16,128}`, checked on `/api/version`: 200 accepted, 401/403 asked again without limit, no answer → saved unchecked, empty → entered later on the touch screen); a saved key that OctoPrint still accepts is kept without asking; `--listen-lan` confirmation; display settings (default yes); reboot at the end (default yes only when the display settings are added) |
 | packages | `cage`, `chromium` or `chromium-browser` (whichever is installed or has an apt candidate), `python3-venv`, `wlr-randr`, `fonts-dejavu-core`, `curl`; `apt-get update` only when something is missing |
 | files | `/opt/floppyoctotouch/{frontend,agent,deploy,VERSION}` replaced as new directories (running scripts keep their copy), root-owned; venv in `/opt/floppyoctotouch/venv` (recreated when the system Python changes), agent force-reinstalled from the wheel; `/usr/local/bin/floppyoctotouch-{update,uninstall}` |
 | config | `~/.config/floppyoctotouch/config.json` (dir 700, file 600, owned by the user): only the managed keys are replaced (`octoprint_url`, `host`, `static_dir`, `uploads_dir`, `usb_roots` = `/media/usb-*`, `usb_eject_command`, `kiosk_restart_command`, `display_backend` = `wlr-randr`, `display_output` from the connected `/sys/class/drm/card*-HDMI-A-*`), `api_key` only when a new one was given and accepted by `/api/version` |
 | system files | units rendered from `deploy/systemd/*.in` (`@USER@`, `@UID@`, `@HOME@`, `@PREFIX@`, …), PAM file, `/etc/floppyoctotouch/kiosk.env` (kept once created), sudoers checked with `visudo -c`, udev rule, groups `video`/`render`/`input`; units enabled, `getty@tty1` disabled |
 | display | block between `# >>> FloppyOctoTouch display >>>` markers appended to `config.txt` (`hdmi_group=2`, `hdmi_mode=87`, `hdmi_cvt 1024 600 60 6 0 0 0`, …) and `video=<output>:1024x600@60` appended to `cmdline.txt`, each with a timestamped backup, only when missing |
 | state | `/etc/floppyoctotouch/install.conf`: version, user, LAN flag, the `cmdline.txt` token actually added |
-| start | without systemd as PID 1 (containers) units are only enabled; otherwise agent restarted, `/local/health` polled for 20 s, reboot offered (default yes when the boot files changed), else the kiosk is restarted |
+| start | without systemd as PID 1 (containers) units are only enabled; otherwise agent restarted, `/local/health` polled for 20 s; then, if a reboot was asked for, a 10 s countdown (Ctrl+C cancels it, trapped `SIGINT`) and `systemctl reboot`, else the kiosk is restarted |
 
 Runtime on the Pi:
 
@@ -363,7 +366,11 @@ with `--purge` or a yes.
 systemd as PID 1) fakes an OctoPi (`pi` user, `octoprint.service`, boot files, a stand-in OctoPrint answering
 `/api/version`) and checks install, config, units (`systemd-analyze verify`), sudo rules, groups, boot files,
 the agent running with the installed config, the kiosk launcher with a fake Chromium, the USB helper with a fake
-`systemd-mount`, a second run (idempotence), update, uninstall and the install from a clone.
+`systemd-mount`, a second run (idempotence), update, uninstall, the install from a clone, self-elevation of
+install/update/uninstall from `pi` (passwordless sudo like OctoPi, installer without its executable bit) and
+interactive runs on a fake terminal: `dev/deploy-test/drive.py` answers each question in order (regex + reply),
+fails on any question printed after "Installing packages", and can send Ctrl+C (key refused then accepted, empty
+key, reinstall keeping the saved key, reboot countdown cancelled or run out).
 
 ## Development environment
 
