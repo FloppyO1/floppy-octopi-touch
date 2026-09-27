@@ -1146,5 +1146,5 @@ _(ogni sessione aggiunge qui decisioni prese, deviazioni dal piano, problemi ape
   arriva a Chromium anche con l'uscita spenta (niente fallback evdev necessario), ma cage rifiuta
   `wlr-randr --on --custom-mode …` in un solo comando (`failed to apply configuration`), e `--on` da solo riaccende
   alla prima modalità dell'elenco (800×450). Corretto: `--on`, poi la modalità in un secondo comando (anche
-  `--preferred`); il frontend ritenta la riaccensione fino a 3 volte. Da riverificare sul Pi.
+  `--preferred`); il frontend ritenta la riaccensione fino a 3 volte. **Verificato sul Pi: ok.**
 - Errore di processo: un `python3 --version` lanciato per sbaglio sul PC host (nessun effetto); da non ripetere.
