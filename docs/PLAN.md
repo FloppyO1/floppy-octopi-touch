@@ -1148,3 +1148,6 @@ _(ogni sessione aggiunge qui decisioni prese, deviazioni dal piano, problemi ape
   alla prima modalità dell'elenco (800×450). Corretto: `--on`, poi la modalità in un secondo comando (anche
   `--preferred`); il frontend ritenta la riaccensione fino a 3 volte. **Verificato sul Pi: ok.**
 - Errore di processo: un `python3 --version` lanciato per sbaglio sul PC host (nessun effetto); da non ripetere.
+- Deciso con l'utente (2026-09-27): la **Sessione 11 parte subito sul branch `session-11`**, mentre la 10 resta `[~]`
+  su `main` per i test con la stampante. Sul branch niente bump né tag; dopo la chiusura della 10 (v1.0.0 su `main`)
+  il branch si unisce a `main` e si chiude la 11 con v1.1.0. Le correzioni della 10 passano nel branch con un merge.
