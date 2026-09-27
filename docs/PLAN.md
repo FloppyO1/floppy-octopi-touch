@@ -209,7 +209,8 @@ FloppyOctoTouch/
 
   Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
   ```
-  (il trailer va aggiornato se cambia il modello indicato dal sistema). Solo git locale, **nessun push / nessun remote**.
+  (il trailer va aggiornato se cambia il modello indicato dal sistema). Claude **non fa mai push**: il remote
+  `github` (https://github.com/FloppyO1/floppy-octopi-touch) lo gestisce l'utente.
 - **Niente tool sul PC host**: Python, Node, Playwright, shellcheck solo via Docker (vedi sezione 1 "Sviluppo e distribuzione").
 - Target touch: elementi interattivi **≥ 56 px**, spaziatura generosa, niente hover-only, feedback visivo immediato al tocco, nessuna azione distruttiva a singolo tap senza conferma.
 - Budget prestazioni sul Pi: bundle JS gzip < ~250 KB, 60 fps nelle transizioni, niente polling REST dove c'è il socket.
@@ -1017,7 +1018,11 @@ _(ogni sessione aggiunge qui decisioni prese, deviazioni dal piano, problemi ape
   file sul Pi. ARCHITECTURE aggiornata (righe root/questions/start, deploy-test).
 - Decisioni:
   - **git è già in OctoPi** (verificato nello `start_chroot_script` del modulo octopi, che installa `git`): nel README
-    `sudo apt install -y git` solo come nota se manca. L'URL del clone resta il segnaposto `github.com/FloppyO1/…`.
+    `sudo apt install -y git` solo come nota se manca.
+  - **Repo: `https://github.com/FloppyO1/floppy-octopi-touch`** (indicata dall'utente a fine sessione): URL del clone
+    e cartella `cd floppy-octopi-touch` nel README, link in Sistema → Informazioni (ora va a capo dopo `/` invece di
+    essere troncato, verificato con Playwright). Il tag `v0.9.1` è stato spostato sul commit con l'URL corretto.
+    La porta 5173 era in un intervallo riservato da Windows (5164-5263): Playwright eseguito sulla build dell'agent.
   - Le domande "Continue anyway?" (sistema non bookworm, OctoPrint che non risponde) restano: fanno parte dei
     controlli preliminari e vengono comunque prima di apt.
   - Senza systemd (container) il conto alla rovescia gira lo stesso e poi avvisa "not rebooting": così il test lo copre.

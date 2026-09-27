@@ -23,6 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - API key prompt: asked again without limit when OctoPrint refuses it; saved unchecked when OctoPrint does not
   answer; a saved key that still works is kept without asking (change it with `--api-key=` or on the touch
   screen). The installer waits up to 10 s for OctoPrint to answer.
+- Repository: `github.com/FloppyO1/floppy-octopi-touch` (clone commands in the README, System → About, where the
+  link now wraps after a slash instead of being cut).
 - README: the Raspberry Pi installation starts with a short step-by-step guide; options, update, uninstall,
   troubleshooting and "What the installer does" follow.
 

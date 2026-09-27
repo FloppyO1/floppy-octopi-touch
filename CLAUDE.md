@@ -20,7 +20,8 @@ then **stop** — never start the next session.
 
   Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
   ```
-  (update the trailer if the model changes). Git is **local only**: no remote, no push.
+  (update the trailer if the model changes). Remote `github` = `https://github.com/FloppyO1/floppy-octopi-touch`,
+  managed by the user: Claude commits and tags locally and **never pushes**.
 - Versioning: SemVer, session N closes with version `0.N.0` and tag `v0.N.0` (session 10 → `1.0.0`).
   Keep `frontend/package.json` and `agent/pyproject.toml` versions aligned; add a CHANGELOG entry.
 - **No tooling on the Windows host**: Node, npm, Python, pytest, ruff, Playwright, shellcheck run only in
@@ -207,4 +208,5 @@ Chromium on tty1 via a PAM/logind session), read-only USB automount (udev + `sys
 sudo rule for eject/kiosk restart, optional display lines in `config.txt`/`cmdline.txt`,
 `floppyoctotouch-update`/`-uninstall`, release build and a bookworm installer test (100 checks). Not yet run on a real
 Pi. Before: every screen (sessions 3-8). Next: session 10 (real Pi checklist and polish).
+Repository: `https://github.com/FloppyO1/floppy-octopi-touch` (README clone commands, About screen).
 See `docs/PLAN.md` for details and notes between sessions.

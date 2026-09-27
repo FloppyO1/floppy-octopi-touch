@@ -6,8 +6,7 @@
   import { capabilities, connection, system } from '../../lib/stores';
   import Card from '../../lib/ui/Card.svelte';
 
-  // Placeholder until the repository is published.
-  const REPO_URL = 'github.com/FloppyO1/FloppyOctoTouch';
+  const REPO_URL = 'github.com/FloppyO1/floppy-octopi-touch';
   const CREDITS = [
     ['Svelte', 'MIT'],
     ['Lucide icons', 'ISC'],
@@ -34,7 +33,10 @@
       <dt>{t('system.hostname')}</dt>
       <dd>{system.info?.hostname ?? '—'}</dd>
       <dt>{t('about.repository')}</dt>
-      <dd>{REPO_URL}</dd>
+      <!-- Too long for one line: may wrap after a slash, never cut. -->
+      <dd class="wrap">
+        {#each REPO_URL.split('/') as part, i (i)}{#if i}/<wbr />{/if}<span>{part}</span>{/each}
+      </dd>
     </dl>
   </Card>
 
@@ -94,6 +96,12 @@
     font-weight: var(--fw-medium);
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  dd.wrap span {
+    white-space: nowrap;
+  }
+  dd.wrap {
+    white-space: normal;
   }
   ul {
     display: flex;

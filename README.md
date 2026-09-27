@@ -200,8 +200,8 @@ the Tatara A8 profile (240 layers, about 45 min, 300×300 PNG thumbnail), handy 
 
    ```sh
    ssh pi@octopi.local
-   git clone https://github.com/FloppyO1/FloppyOctoTouch.git
-   cd FloppyOctoTouch
+   git clone https://github.com/FloppyO1/floppy-octopi-touch.git
+   cd floppy-octopi-touch
    ./deploy/install.sh
    ```
 
@@ -219,8 +219,8 @@ the Tatara A8 profile (240 layers, about 45 min, 300×300 PNG thumbnail), handy 
 
 ### Install without git
 
-Copy the `FloppyOctoTouch` folder to the Pi (for example with `scp -r` or WinSCP) and run
-`bash FloppyOctoTouch/deploy/install.sh`. Or copy only the release tarball and its checksum file from `release/`:
+Copy the `floppy-octopi-touch` folder to the Pi (for example with `scp -r` or WinSCP) and run
+`bash floppy-octopi-touch/deploy/install.sh`. Or copy only the release tarball and its checksum file from `release/`:
 
 ```sh
 sha256sum -c floppyoctotouch-X.Y.Z.tar.gz.sha256
@@ -247,9 +247,9 @@ reconfigures the installation and keeps a saved API key that OctoPrint still acc
 ### Update and uninstall
 
 ```sh
-cd FloppyOctoTouch && git pull && ./deploy/install.sh      # from the clone
-floppyoctotouch-update floppyoctotouch-X.Y.Z.tar.gz       # from a tarball (+ its .sha256)
-floppyoctotouch-uninstall                                 # --purge also deletes the configuration
+cd floppy-octopi-touch && git pull && ./deploy/install.sh   # from the clone
+floppyoctotouch-update floppyoctotouch-X.Y.Z.tar.gz         # from a tarball (+ its .sha256)
+floppyoctotouch-uninstall                                   # --purge also deletes the configuration
 ```
 
 Updates keep the API key, the dashboard settings and the kiosk options, and do not touch the display settings;
