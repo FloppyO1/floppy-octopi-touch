@@ -85,7 +85,7 @@ After=network-online.target
 
 [Service]
 Type=exec
-User=pi
+User=1000
 ExecStart=/opt/octopi/oprint/bin/octoprint serve --host=127.0.0.1 --port=5000
 
 [Install]

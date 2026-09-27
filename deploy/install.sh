@@ -156,11 +156,19 @@ FOT_HOME=''
 choose_user() {
   local detected='' octoprint_user=''
   octoprint_user=$(printf '%s\n' "$OCTOPRINT_UNIT_TEXT" | sed -n 's/^User=//p' | tail -n1)
+  # OctoPi 1.1.0 writes the uid (User=1000), so the unit survives renaming the user in Raspberry Pi Imager.
+  if [[ $octoprint_user =~ ^[0-9]+$ ]]; then
+    octoprint_user=$(getent passwd "$octoprint_user" | cut -d: -f1)
+  fi
   detected=$octoprint_user
   if [ -n "$detected" ]; then
     info "octoprint.service runs as '$detected'"
   else
-    warn "octoprint.service not found"
+    if [ -n "$OCTOPRINT_UNIT_TEXT" ]; then
+      warn "cannot tell the user of octoprint.service"
+    else
+      warn "octoprint.service not found"
+    fi
     if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != root ]; then
       detected=$SUDO_USER
     elif id pi >/dev/null 2>&1; then
