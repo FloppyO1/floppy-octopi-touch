@@ -28,7 +28,9 @@ then **stop** — never start the next session.
   ```
   (update the trailer if the model changes). Remote `github` = `https://github.com/FloppyO1/floppy-octopi-touch`,
   managed by the user: Claude commits and tags locally and **never pushes**.
-- Versioning: SemVer, session N closes with version `0.N.0` and tag `v0.N.0` (session 10 → `1.0.0`, session 11 → `1.1.0`).
+- Versioning: SemVer, session N closes with version `0.N.0` and tag `v0.N.0` (exceptions: session 9b → `0.9.1`; the **final session** → `1.0.0`).
+- Tests on the real Pi never block a session: they go to the list of the "final session" in `docs/PLAN.md`, which
+  always stays the last one (new sessions are added before it).
   Keep `frontend/package.json` and `agent/pyproject.toml` versions aligned; add a CHANGELOG entry.
 - **No tooling on the Windows host**: Node, npm, Python, pytest, ruff, Playwright, shellcheck run only in
   Docker (even though Node/Python exist on the PC). Never `npm install` / `pip install` on the host.
@@ -238,10 +240,11 @@ display; reboot), then it runs unattended and reboots after a cancellable 10 s c
 installer itself (idempotent; from a clone it installs the tarball in `release/`), agent + kiosk systemd units (cage +
 Chromium on tty1 via a PAM/logind session), read-only USB automount (udev + `systemd-mount` on `/media/usb-<label>`),
 sudo rule for eject/kiosk restart, optional display lines in `config.txt`/`cmdline.txt`,
-`floppyoctotouch-update`/`-uninstall`, release build and a bookworm installer test (100 checks). Not yet run on a real
-Pi. Before: every screen (sessions 3-8). Session 10 (real Pi checklist and polish) in progress on `main`.
+`floppyoctotouch-update`/`-uninstall`, release build and a bookworm installer test (100 checks), now installed and
+running on a real Pi. Before: every screen (sessions 3-8). Session 10 (fixes from the Pi and polish, v0.10.0) in
+progress on `main`: kiosk watchdog and webcam recovery done; next the filament/temperature fixes listed in the plan.
 Session 11 (cancel objects, merged into `main` on 2026-09-27: agent `/local/objects`, Home "Objects" dialog, M486 or the Cancel Objects plugin,
-installer question; installer test 127 checks): code and docs done, waiting for the test on the Pi with the printer;
-version bump and tags (v1.0.0, then v1.1.0) when sessions 10 and 11 close.
+installer question; installer test 127 checks): code and docs done, closes as v0.11.0 after session 10. All the
+tests on the Pi (hardware checklist, cancel objects with the printer, the fixes) are in the final session (v1.0.0).
 Repository: `https://github.com/FloppyO1/floppy-octopi-touch` (README clone commands, About screen).
 See `docs/PLAN.md` for details and notes between sessions.

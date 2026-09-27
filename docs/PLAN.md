@@ -15,7 +15,7 @@ Leggi docs/PLAN.md ed esegui la procedura della sezione 0.
 Procedura:
 1. Leggere **tutto** questo file e, se esiste, `CLAUDE.md`.
 2. **Individuare la sessione da eseguire** nella sezione 6 "Stato avanzamento":
-   - se c'è una riga `[~]` (in corso) → è una **sessione interrotta**: controllare `git status`, `git log` e le
+   - se c'è una riga `[~]` (in corso; se sono più d'una, la prima in ordine) → è una **sessione interrotta**: controllare `git status`, `git log` e le
      "Note tra sessioni", dire all'utente cosa è già fatto e cosa manca, poi completarla;
    - altrimenti → la **prima riga `[ ]`** in ordine.
    - Se tutte sono `[x]`, dirlo all'utente e chiedere come proseguire.
@@ -26,11 +26,13 @@ Procedura:
    rispettando le convenzioni della sezione 3.
 5. **Stop intermedi previsti** (aspettare la risposta dell'utente prima di proseguire):
    - Sessione 3: dopo gli screenshot delle varianti del colore d'accento;
-   - Sessione 10: dopo ogni passo della checklist hardware (l'utente ha il Pi davanti e riporta l'esito);
-     se la sessione si allunga, spezzarla in 10a / 10b.
+   - Sessione finale: dopo ogni passo della checklist hardware (l'utente ha il Pi davanti e riporta l'esito);
+     se la sessione si allunga, spezzarla in parti. Le altre sessioni non si fermano per i test sul Pi: li
+     aggiungono all'elenco della Sessione finale, che resta **sempre l'ultima** (le nuove sessioni vanno prima).
    - In qualsiasi sessione: quando serve una decisione che il piano non copre.
 6. Chiusura: checklist della sezione 3, con **versione = 0.N.0** e tag `v0.N.0` per la Sessione N
-   (eccezioni: Sessione 9b → `0.9.1` / `v0.9.1`; Sessione 10 → `1.0.0` / `v1.0.0`; Sessione 11 → `1.1.0` / `v1.1.0`). Marcare la riga come `[x]` con la data, aggiungere le note
+   (eccezioni: Sessione 9b → `0.9.1` / `v0.9.1`; **Sessione finale** → `1.0.0` / `v1.0.0`; quindi Sessione 10 → `0.10.0`,
+   Sessione 11 → `0.11.0`). Marcare la riga come `[x]` con la data, aggiungere le note
    in "Note tra sessioni".
 7. **Fermarsi.** Non iniziare la sessione successiva: l'utente riavvierà con lo stesso prompt in una nuova sessione.
 
@@ -463,20 +465,63 @@ Leggi docs/PLAN.md e CLAUDE.md. Esegui la Sessione 9b:
 - Chiusura sessione (sezione 3) con versione e tag v0.9.1 locale, poi FERMATI.
 ```
 
-### Sessione 10 — Test sul Raspberry reale e rifinitura
+### Sessione 10 — Correzioni dal Pi e rifinitura
+Riorganizzata il 2026-09-27 su richiesta dell'utente: la prima parte (installazione sul Pi, checklist parziale, bug
+corretti: vedi Note tra sessioni) è fatta; **i test sul Raspberry sono spostati nella Sessione finale**, così questa
+sessione è solo sviluppo, verificato nel dev (Docker, Virtual Printer, Playwright), **senza stop per i test sul Pi**.
+Se per un punto serve un dato dal Pi (per esempio il log del terminale con la stampante vera), chiederlo all'utente
+ma non bloccarsi: fare una soluzione robusta verificabile nel dev e lasciare la prova reale alla Sessione finale
+(annotandola nel suo elenco).
 ```
-Leggi docs/PLAN.md e CLAUDE.md. Esegui la Sessione 10 (io ho il Raspberry davanti e ti riporto l'esito):
-- Guidami nell'installazione sul Pi (flusso della Sessione 9b: key creata in OctoPrint, clone +
-  ./deploy/install.sh) e nella checklist hardware: boot → kiosk automatico, touch preciso, risoluzione
-  corretta, funzionamento senza WiFi, riconnessione se OctoPrint si riavvia, stampante spenta/accesa, webcam USB UVC,
-  chiavetta USB (inserimento, import, espulsione), SD della stampante, beep M300 dal buzzer dell'LCD, host prompt
-  (M876, se il firmware ha PROMPT_SUPPORT), spegnimento HDMI e risveglio al tocco, prestazioni (CPU/RAM Chromium),
-  screensaver, tempi di avvio.
-- Correggi i bug trovati, ottimizza (flag GPU Chromium, bundle size), rifinisci animazioni e dimensioni dei target.
-- README finale con screenshot reali, CHANGELOG, tag v1.0.0 locale.
-- Suggerisci la GitHub Action per build della release al tag (senza pubblicare nulla).
-- Chiusura sessione (sezione 3) con versione 1.0.0.
-- Se la sessione si allunga per i bug, spezzala: 10a (installazione + checklist), 10b (fix + rifinitura), con stop fra le due.
+Leggi docs/PLAN.md e CLAUDE.md. Completa la Sessione 10 (niente test sul Pi: quelli sono nella Sessione finale):
+1. Modifica della temperatura durante il riscaldamento iniziale di una stampa (segnalato dall'utente). Oggi, se il
+   G-code della stampa sta aspettando il riscaldamento (M109 / M190 / M191 bloccanti) e l'utente cambia il target
+   (NumPad dal gauge, Home o schermata Temperature), il nuovo valore arriva alla stampante solo alla fine
+   dell'attesa: Marlin non legge altri comandi finché M109/M190 non finiscono, quindi prima arriva al valore del
+   G-code e poi a quello scelto. Deve andare SUBITO al valore scelto. Idea da verificare (non inventare API):
+   - capire che c'è un'attesa in corso dal log (`Send: M109 …` / `M190` / `M191` del job senza righe `Send:`
+     successive: con il flusso a `ok` di OctoPrint la riga dopo parte solo a fine attesa), in `core/` con test;
+   - con il firmware che ha `EMERGENCY_PARSER` (capability `emergencyParser` da M115): mettere in coda il nuovo
+     comando bloccante per il riscaldatore in attesa (`M109 S<nuovo>` con lo stesso `T`, `M190 S<nuovo>` per il piatto;
+     `R` se il nuovo target è sotto la temperatura attuale) e poi mandare `M108` (interrompe l'attesa in corso): la
+     stampante riparte subito verso il nuovo valore e la stampa continua solo quando lo raggiunge. Per l'altro
+     riscaldatore (quello non in attesa) basta M104/M140, ma va rimessa in coda anche l'attesa di quello in corso con
+     il suo target. Verificare nel sorgente di OctoPrint 1.11 che M108 venga inviato subito anche con una riga in
+     attesa di `ok` (comandi di emergenza / `serial.emergencyCommands`?) e che i comandi dell'API passino prima delle
+     righe successive del job; verificare cosa fa la Virtual Printer con M108 (se non lo gestisce, testare con righe
+     finte nel log);
+   - senza EMERGENCY_PARSER: comportamento attuale, ma con un avviso chiaro ("verrà applicata al termine del
+     riscaldamento");
+   - un solo punto di ingresso (`askHeaterTarget` in `screens/heaterTarget.ts`), unit test + passo Playwright.
+2. Filamento, carica/scarica: se si annulla durante il riscaldamento (o in qualsiasi passo del wizard) il
+   riscaldamento deve fermarsi, non continuare. Oggi `wizard.cancel()` manda solo `M410` durante i movimenti e il
+   target resta. Annullare = spegnere l'hot end (M104 S0, senza chiedere: il wizard è bloccato durante le stampe)
+   con un toast; test nello smoke test.
+3. Filamento: aggiungere **Cambia filamento** accanto a Carica e Scarica, sempre disponibile (oggi c'è solo con M600 /
+   `advancedPause`). È in sequenza uno scarico e un carico: materiale → riscaldamento → scarico → "togli il vecchio e
+   inserisci il nuovo" → carico → spurgo → fine (con M701/M702 se la capability è attiva, altrimenti le sequenze G-code).
+   M600 non serve più per il wizard (è pensato per il cambio a metà stampa e chiede conferme sul display della
+   stampante): decidere in sessione se tenerlo come variante o toglierlo. Aggiornare passi, testi (en + it), smoke test.
+4. Filamento, carica: il passo 5 (spurgo) compare subito, invece di attendere la fine del passo 4 (movimenti di
+   carico). La fine è riconosciuta dal `PositionUpdate` che risponde a `M400` + `M114`: con Marlin reale arriva
+   evidentemente prima. Cause probabili da verificare: `PositionUpdate` non legati al nostro M114 (autoreport della
+   posizione `M154` / `Cap:AUTOREPORT_POS`, M114 mandati da OctoPrint o da altre schermate), M701 che risponde prima
+   di finire. Correzione: legare la fine al nostro comando (per esempio un marcatore univoco dopo `M400`, come
+   `M118 FOT <id>` riconosciuto nel log, se M118 è disponibile; oppure controllare che la `e` del PositionUpdate sia
+   quella attesa) e non accettarla prima di una durata minima (frazione della durata nominale). Chiedere all'utente il
+   log del terminale di un carico sul Pi, se aiuta, senza bloccarsi. Vale anche per scarico, spurgo e cambio.
+5. Impostazioni di carica/scarica (Filamento → Estrusore): nuova opzione "Raffredda al termine" (default spento):
+   alla fine di carica, scarica o cambio filamento (passo "fine", dopo lo spurgo) spegne l'hot end da solo.
+   Migrazione delle impostazioni (nuova `schemaVersion`), i18n, test.
+6. Installer: avviso se il Pi ha più di ~3 GB di RAM e gira il kernel a 32 bit (`arm_64bit=0`, `uname -m` =
+   `armv7l`, `kernel8.img` presente): spiegare il rischio (OOM con GB liberi, vedi Note) e i passi manuali per
+   `arm_64bit=1`; nessuna modifica automatica. Test nel deploy-test.
+7. Rifiniture annotate nelle Note della Sessione 10: messaggio prima di apt (download di Chromium lungo, senza
+   barra); valutare se togliere/sostituire la riga `video=` e le righe `hdmi_*` (inutili con questo schermo);
+   paracadute per risoluzioni diverse da 1024×600; animazioni e dimensioni dei target; bundle size (oggi ~151 KB gzip).
+8. Suggerire la GitHub Action per la build della release al tag (file pronto, senza pubblicare nulla).
+- Ogni punto con i suoi test (pytest/vitest/Playwright a 1024×600) e le voci in CHANGELOG, ARCHITECTURE, CLAUDE.md.
+- Chiusura sessione (sezione 3) con versione 0.10.0 e tag v0.10.0 locale, poi FERMATI.
 ```
 
 ### Sessione 11 — Rimozione di oggetti dalla stampa in corso
@@ -484,7 +529,8 @@ Obiettivo: durante una stampa con più oggetti, toccare un oggetto su una mappa 
 e la stampante smette di stamparlo mentre continua gli altri. Decisioni dell'utente (2026-09-27): meccanismo
 **automatico** fra firmware (`M486`) e plugin OctoPrint **Cancel Objects** (il firmware attuale **non** ha
 `CANCEL_OBJECTS`, quindi oggi si usa il plugin); interfaccia **mappa del piatto + elenco**; plugin proposto da una
-**domanda dell'installer** (Invio = sì); sessione **dopo la 1.0.0** → v1.1.0.
+**domanda dell'installer** (Invio = sì); sessione **dopo la 1.0.0** → v1.1.0. Aggiornato il 2026-09-27: con i test sul Pi
+spostati nella Sessione finale, la 11 si chiude con **v0.11.0** dopo la 10 e la sua verifica sul Pi è nella Sessione finale.
 ```
 Leggi docs/PLAN.md e CLAUDE.md. Esegui la Sessione 11:
 - Verifiche prima di scrivere codice (non inventare API; se una verifica fallisce FERMATI e chiedi all'utente):
@@ -530,9 +576,35 @@ Leggi docs/PLAN.md e CLAUDE.md. Esegui la Sessione 11:
   finte via `!!DEBUG:send`). Screenshot 1024×600 del dialog.
 - README: funzione, impostazioni dello slicer consigliate ("Label objects": `OctoPrint comments` senza M486,
   `Firmware-specific` con M486), cosa chiede l'installer; ARCHITECTURE (endpoint, capability, flusso); CHANGELOG.
-- Verifica finale sul Pi con la stampante (stop intermedio: l'utente prova una stampa con 3-4 oggetti piccoli e ne
-  annulla uno, riporta l'esito).
-- Chiusura sessione (sezione 3) con versione 1.1.0 e tag v1.1.0 locale, poi FERMATI.
+- Verifica sul Pi con la stampante (3-4 oggetti piccoli, annullarne uno): spostata nella Sessione finale.
+- Chiusura sessione (sezione 3) con versione 0.11.0 e tag v0.11.0 locale, poi FERMATI.
+```
+
+### Sessione finale — Test sul Raspberry reale e rilascio 1.0.0
+**Resta sempre l'ultima sessione**: le nuove sessioni si aggiungono prima di questa (anche in "Stato avanzamento").
+Raccoglie tutte le prove sul Pi con la stampante; stop dopo ogni passo (l'utente ha il Pi davanti e riporta l'esito).
+Ogni sessione che rimanda una verifica al Pi la aggiunge a questo elenco.
+```
+Leggi docs/PLAN.md e CLAUDE.md. Esegui la Sessione finale (io ho il Raspberry davanti e ti riporto l'esito):
+- Aggiornare il Pi al codice attuale (git pull + ./deploy/install.sh) e la checklist hardware ancora da fare:
+  stampante spenta/accesa e riconnessione se OctoPrint si riavvia, webcam USB UVC, chiavetta USB (inserimento, import,
+  espulsione), SD della stampante, beep M300 dal buzzer dell'LCD, host prompt (M876, se il firmware ha
+  PROMPT_SUPPORT), screensaver, tempi di avvio, prestazioni misurate (CPU/RAM di Chromium; flag GPU di Chromium se
+  servono). Già fatti nella Sessione 10: installazione, kiosk al boot, tocco, risoluzione, senza WiFi, HDMI off +
+  risveglio, prestazioni a occhio.
+- Verifiche rimandate dalle sessioni precedenti:
+  - watchdog del kiosk e webcam che si ricollega dopo un blocco (Sessione 10, correzioni del 2026-09-27);
+  - monitor della memoria con la webcam attiva per 20-30 min (per escludere perdite nel suo percorso) ed esito del
+    kernel a 64 bit (`arm_64bit=1`, `uname -m` = `aarch64`);
+  - rimozione di oggetti (Sessione 11): stampa di 3-4 oggetti piccoli, annullarne uno (file caricato DOPO
+    l'installazione del plugin);
+  - punti 1-5 della Sessione 10 con la stampante vera: temperatura cambiata durante il riscaldamento iniziale (M108),
+    annulla che spegne il riscaldamento, cambia filamento, fine del carico riconosciuta al momento giusto,
+    raffreddamento automatico;
+  - installer: avviso del kernel a 32 bit (punto 6 della Sessione 10).
+- Correggere i bug trovati (se sono tanti, spezzare la sessione in parti con stop fra l'una e l'altra).
+- README finale con screenshot reali (controllare che non mostrino IP, SSID o altri dati), CHANGELOG.
+- Chiusura sessione (sezione 3) con versione 1.0.0 e tag v1.0.0 locale, poi FERMATI.
 ```
 
 ---
@@ -540,7 +612,7 @@ Leggi docs/PLAN.md e CLAUDE.md. Esegui la Sessione 11:
 ## 5. Rischi e punti da verificare
 | Rischio | Mitigazione |
 |---|---|
-| `cage` + Chromium su Bookworm Lite: nome pacchetto Chromium, permessi seat/tty | Rilevare pacchetto; usare `seatd` o PAM login nella unit; test sul Pi in Sessione 10 |
+| `cage` + Chromium su Bookworm Lite: nome pacchetto Chromium, permessi seat/tty | Rilevare pacchetto; usare `seatd` o PAM login nella unit; test sul Pi (Sessione 9b/10, fatto) |
 | Risoluzione 1024×600 non rilevata via EDID con KMS | Opzione `video=HDMI-A-1:1024x600@60` in cmdline.txt + righe produttore in config.txt, con backup |
 | API webcam cambiata in OctoPrint ≥1.9 (plugin webcam multipli) | Verificare contro 1.11 nel container; fallback a URL manuale nelle impostazioni |
 | Capability non esposte da M115 (M600/M701/M702) | Toggle manuali nelle impostazioni + sequenze G-code alternative |
@@ -548,11 +620,11 @@ Leggi docs/PLAN.md e CLAUDE.md. Esegui la Sessione 11:
 | Tocco di risveglio dallo screensaver che preme pulsanti | Overlay che "mangia" il primo tocco |
 | Chromium che mostra "ripristina sessione" dopo spegnimento brusco | Profilo pulito a ogni avvio + `--disable-session-crashed-bubble` |
 | API key esposta in LAN tramite proxy | Agent solo su 127.0.0.1 di default |
-| HDMI spento: il touch potrebbe non arrivare a Chromium / cage potrebbe chiudersi senza output | Funzione default off; fallback risveglio via evdev nell'agent; test in S10 |
+| HDMI spento: il touch potrebbe non arrivare a Chromium / cage potrebbe chiudersi senza output | Funzione default off; fallback risveglio via evdev nell'agent; verificato in S10 (tocco ok, evdev non serve) |
 | Automount USB assente su Bookworm Lite; filesystem exFAT/NTFS | udev + systemd-mount in sola lettura; supporto FAT32/exFAT (pacchetto `exfatprogs` se serve) |
 | Chiavetta USB come vettore di path traversal / file enormi | Agent confinato a /media/usb*, solo estensioni .gcode/.gco/.g, limite dimensione configurabile |
 | Storage SD via seriale lento e bloccante durante la stampa | Refresh SD solo su richiesta e mai durante la stampa; nessun upload verso SD in v1 |
-| Host prompt Marlin non emulati dalla Virtual Printer | Test con righe `//action:` fittizie; verifica reale in S10 |
+| Host prompt Marlin non emulati dalla Virtual Printer | Test con righe `//action:` fittizie; verifica reale nella Sessione finale |
 | Tipo estrusore sconosciuto → carico/scarico errati | Default prudenti + richiesta di configurazione al primo wizard |
 | Plugin Cancel Objects non mantenuto / incompatibile con OctoPrint 1.11 | Verifica nel container a inizio Sessione 11, versione fissata; se rotto stop e decisione dell'utente (fork o plugin nostro) |
 | Installazione del plugin che disturba OctoPrint | Solo via API del Plugin Manager, versione fissata, mai riavvio durante la stampa, uninstall solo se installato da noi |
@@ -574,8 +646,9 @@ _Legenda: `[ ]` da fare · `[~]` in corso (interrotta se la trovi a inizio sessi
 - [x] Sessione 8 — Sistema e Impostazioni (2026-09-25, v0.8.0)
 - [x] Sessione 9 — Installazione sul Raspberry (2026-09-25, v0.9.0; interrotta una volta e ripresa lo stesso giorno)
 - [x] Sessione 9b — Installazione in un solo comando (2026-09-27, v0.9.1)
-- [~] Sessione 10 — Test reale e rifinitura (iniziata 2026-09-27; segnata `[~]` il 2026-09-25 senza lavoro fatto, rimessa `[ ]` per fare prima la 9b)
-- [~] Sessione 11 — Rimozione di oggetti dalla stampa in corso (aggiunta il 2026-09-27, v1.1.0; iniziata 2026-09-27 sul branch `session-11`)
+- [~] Sessione 10 — Correzioni dal Pi e rifinitura, v0.10.0 (iniziata 2026-09-27 come "Test reale e rifinitura"; segnata `[~]` il 2026-09-25 senza lavoro fatto, rimessa `[ ]` per fare prima la 9b; riorganizzata il 2026-09-27: i test sul Pi sono nella Sessione finale)
+- [~] Sessione 11 — Rimozione di oggetti dalla stampa in corso, v0.11.0 (aggiunta il 2026-09-27 come v1.1.0; iniziata 2026-09-27 sul branch `session-11`, ora su `main`; manca solo la chiusura, la verifica sul Pi è nella Sessione finale)
+- [ ] Sessione finale — Test sul Raspberry reale e rilascio 1.0.0 (resta sempre l'ultima riga: le nuove sessioni si aggiungono sopra)
 
 ### Note tra sessioni
 _(ogni sessione aggiunge qui decisioni prese, deviazioni dal piano, problemi aperti)_
@@ -1248,3 +1321,12 @@ _(ogni sessione aggiunge qui decisioni prese, deviazioni dal piano, problemi ape
   fast-forward di `main` a `session-11` (nessuna modifica di `main` persa). Cambia la decisione precedente: niente
   più merge dopo la 1.0.0; le sessioni 10 e 11 proseguono entrambe su `main` e alla chiusura si fanno bump e tag
   (v1.0.0 per la 10, poi v1.1.0 per la 11). Il branch `session-11` resta locale (si può cancellare).
+- **Riorganizzazione del piano (2026-09-27, richiesta dell'utente)**: i test sul Raspberry non devono più bloccare lo
+  sviluppo. Tutte le prove sul Pi (checklist hardware rimasta, verifiche delle correzioni, rimozione di oggetti con la
+  stampante) sono raccolte nella nuova **Sessione finale**, che resta **sempre l'ultima** (nuove sessioni si
+  aggiungono prima) e chiude con **v1.0.0**. Di conseguenza: Sessione 10 = "Correzioni dal Pi e rifinitura" →
+  **v0.10.0** (niente stop per il Pi), Sessione 11 → **v0.11.0** (manca solo la chiusura). Nuovi punti dell'utente
+  nella Sessione 10 (sezione 4): temperatura cambiata durante il riscaldamento iniziale che deve valere subito,
+  annulla del wizard filamento che spegne il riscaldamento, "Cambia filamento" (scarico + carico), passo di spurgo
+  che compare prima della fine del carico, raffreddamento automatico a fine carico/scarico/cambio; aggiunti anche
+  l'avviso dell'installer per il kernel a 32 bit, le rifiniture già annotate e la GitHub Action.
