@@ -382,6 +382,22 @@ check "installed while printing" test -f $PLUGIN
 check "OctoPrint not restarted during a print" grep -q "restart it after the print" /tmp/plugin-printing.log
 rm -f /tmp/fake-job-state
 floppyoctotouch-uninstall --non-interactive --purge
+rm -f $PLUGIN
+
+section "Cancel Objects declined: answer no, then --no-cancel-plugin"
+status=0
+drive --transcript /tmp/drive-no-plugin.log --answers "$(printf '%s' \
+  '[["API key", "'"$KEY"'"], ["Cancel Objects plugin", "n"], ["display settings", "n"], ["Reboot automatically", ""]]')" \
+  -- bash "$src/deploy/install.sh" || status=$?
+check_eq "installer finished" 0 "$status"
+check "plugin not installed (answer no)" test ! -e $PLUGIN
+check "state: not added by the installer (answer no)" grep -qx 'FOT_CANCEL_PLUGIN=0' $STATE
+floppyoctotouch-uninstall --non-interactive --purge
+bash "$src/deploy/install.sh" --non-interactive --api-key="$KEY" --skip-display-config --no-cancel-plugin \
+  >/tmp/plugin-flag.log 2>&1
+check "plugin not installed (--no-cancel-plugin)" test ! -e $PLUGIN
+check "summary says why" grep -q "not installed (--no-cancel-plugin)" /tmp/plugin-flag.log
+floppyoctotouch-uninstall --non-interactive --purge
 
 printf '\n%d passed, %d failed\n' "$PASSED" "$FAILED"
 [ "$FAILED" = 0 ]
