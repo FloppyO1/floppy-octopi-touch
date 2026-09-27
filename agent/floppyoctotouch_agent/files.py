@@ -1,6 +1,7 @@
 """File endpoints of the agent: G-code thumbnails, USB sticks and the local event stream.
 
 GET  /local/thumbnail?path=<local storage path>&v=<file date>
+GET  /local/objects?path=<local storage path>  → printed objects and their footprint (cancel object)
 GET  /local/usb                         → {"mounts": [...], "files": [...]}
 GET  /local/usb/thumbnail?mount=<id>&path=<path>
 POST /local/usb/import {"mount", "path", "folder"} → NDJSON progress, then the result
@@ -22,6 +23,7 @@ from aiohttp import web
 from yarl import URL
 
 from .config import Config
+from .objects import ObjectCache
 from .proxy import CLIENT_SESSION
 from .thumbnails import (
     Thumbnail,
@@ -93,6 +95,7 @@ class FilesApi:
     def __init__(self, config: Config) -> None:
         self.config = config
         self.cache = ThumbnailCache(config.data_dir / "thumbnails")
+        self.objects = ObjectCache(config.data_dir / "objects")
         self.usb = UsbManager(
             config.usb_roots, config.usb_eject_command, config.usb_max_file_mb * 1024 * 1024
         )
@@ -145,6 +148,16 @@ class FilesApi:
         except aiohttp.ClientError as exc:
             raise ApiError(502, "octoprint_unreachable", str(exc)) from None
         return _image(thumb)
+
+    async def local_objects(self, request: web.Request) -> web.Response:
+        rel = _storage_path(request.query.get("path", ""))
+        if not rel.lower().endswith(GCODE_EXTENSIONS):
+            raise ApiError(400, "not_gcode", rel)
+        path = self._uploads_file(rel)
+        if path is None:
+            # No download fallback: the whole file would have to go through the proxy.
+            raise ApiError(404, "no_such_file", rel)
+        return web.json_response(await self.objects.objects_for_file(path))
 
     # ------------------------------------------------------------ USB
     async def usb_list(self, request: web.Request) -> web.Response:
@@ -298,6 +311,7 @@ class FilesApi:
         app.cleanup_ctx.append(self._watch)
         app.on_shutdown.append(self._shutdown)
         app.router.add_get("/local/thumbnail", self.local_thumbnail)
+        app.router.add_get("/local/objects", self.local_objects)
         app.router.add_get("/local/usb", self.usb_list)
         app.router.add_get("/local/usb/thumbnail", self.usb_thumbnail)
         app.router.add_post("/local/usb/import", self.usb_import)
