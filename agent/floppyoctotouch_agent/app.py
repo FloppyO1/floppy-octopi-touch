@@ -10,12 +10,14 @@ import aiohttp
 from aiohttp import web
 
 from . import __version__
+from .commands import run_command
 from .config import Config, save_config_values
-from .control import ControlApi
+from .control import KIOSK_TIMEOUT_S, ControlApi
 from .display import Display, DisplayError, valid_mode
 from .files import FilesApi
 from .proxy import CLIENT_SESSION, OctoPrintProxy, WebcamProxy
 from .settings import SettingsStore
+from .watchdog import KioskWatchdog
 
 log = logging.getLogger(__name__)
 
@@ -170,6 +172,12 @@ def _make_display(config: Config) -> Display:
     )
 
 
+def _make_watchdog(config: Config) -> KioskWatchdog:
+    command = config.kiosk_restart_command
+    restart = (lambda: run_command(command, KIOSK_TIMEOUT_S)) if command else None
+    return KioskWatchdog(config.kiosk_watchdog_s, restart)
+
+
 async def _close_display(app: web.Application) -> AsyncIterator[None]:
     yield
     await app[DISPLAY].close()
@@ -216,7 +224,7 @@ def create_app(config: Config) -> web.Application:
 
     OctoPrintProxy(config.octoprint_url, lambda: config.api_key).add_routes(app)
     WebcamProxy(config.webcam_url).add_routes(app)
-    FilesApi(config).add_routes(app)
+    FilesApi(config, _make_watchdog(config)).add_routes(app)
     ControlApi(config).add_routes(app)
 
     static = _static_handler(config.static_dir)

@@ -6,7 +6,8 @@ GET  /local/usb                         → {"mounts": [...], "files": [...]}
 GET  /local/usb/thumbnail?mount=<id>&path=<path>
 POST /local/usb/import {"mount", "path", "folder"} → NDJSON progress, then the result
 POST /local/usb/eject  {"mount"}
-GET  /local/events                      → Server-Sent Events ("usb" mount changes)
+GET  /local/events                      → Server-Sent Events ("usb" mount changes); always open
+                                          in the kiosk page: the kiosk watchdog watches it
 """
 
 from __future__ import annotations
@@ -40,6 +41,7 @@ from .usb import (
     file_body,
     multipart_parts,
 )
+from .watchdog import KioskWatchdog
 
 log = logging.getLogger(__name__)
 
@@ -92,8 +94,9 @@ def _string(data: dict[str, object], key: str, default: str | None = None) -> st
 
 
 class FilesApi:
-    def __init__(self, config: Config) -> None:
+    def __init__(self, config: Config, watchdog: KioskWatchdog | None = None) -> None:
         self.config = config
+        self.watchdog = watchdog or KioskWatchdog(0, None)
         self.cache = ThumbnailCache(config.data_dir / "thumbnails")
         self.objects = ObjectCache(config.data_dir / "objects")
         self.usb = UsbManager(
@@ -261,6 +264,7 @@ class FilesApi:
     async def events(self, request: web.Request) -> web.StreamResponse:
         await self.watcher.check()
         queue = self.hub.subscribe()
+        kiosk_page = self.watchdog.connected(request.remote)
         response = web.StreamResponse(
             headers={
                 "Content-Type": "text/event-stream",
@@ -286,6 +290,8 @@ class FilesApi:
             pass
         finally:
             self.hub.unsubscribe(queue)
+            if kiosk_page:
+                self.watchdog.disconnected()
         return response
 
     # ------------------------------------------------------------ wiring
@@ -304,6 +310,7 @@ class FilesApi:
             await task
 
     async def _shutdown(self, app: web.Application) -> None:
+        await self.watchdog.close()
         self.hub.close()
 
     def add_routes(self, app: web.Application) -> None:

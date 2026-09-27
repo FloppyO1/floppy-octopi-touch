@@ -127,6 +127,7 @@ Agent settings added for files and the System screen (in `config.json` or as `FO
 | `usb_eject_command` (`FOT_USB_EJECT_COMMAND`) | `systemd-mount --umount {path}` | command that unmounts a stick; `none` only hides it |
 | `usb_max_file_mb` (`FOT_USB_MAX_FILE_MB`) | `1024` | largest file accepted for import |
 | `kiosk_restart_command` (`FOT_KIOSK_RESTART_COMMAND`) | `sudo -n systemctl restart floppyoctotouch-kiosk.service` | "Restart the screen" on the System screen; `none` only logs (the page reloads) |
+| `kiosk_watchdog_s` (`FOT_KIOSK_WATCHDOG_S`) | `60` | seconds without the kiosk page (e.g. Chromium's renderer crashed) before the kiosk is restarted with `kiosk_restart_command`; `0` turns it off |
 | `disk_path` (`FOT_DISK_PATH`) | `/` | file system shown as "disk" on the System screen |
 
 Pages and URL options useful while developing:
