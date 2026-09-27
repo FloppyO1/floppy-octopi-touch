@@ -320,6 +320,30 @@ replace_dir() {
   mv -- "$dest.new" "$dest"
 }
 
+# cage draws its own arrow in the middle of the screen (CSS only hides it over the page): the kiosk unit points
+# XCURSOR_PATH at a "default" theme whose cursors are a single transparent pixel.
+install_cursor_theme() {
+  local dir=$FOT_PREFIX/cursors/default/cursors name
+  rm -rf "$FOT_PREFIX/cursors"
+  mkdir -p "$dir"
+  python3 - "$dir/left_ptr" <<'PY'
+import struct, sys
+
+IMAGE = 0xFFFD0002
+size = 24  # nominal size; the image itself is 1x1 and fully transparent
+header = struct.pack("<4sIII", b"Xcur", 16, 0x10000, 1) + struct.pack("<III", IMAGE, size, 28)
+image = struct.pack("<IIIIIIIII", 36, IMAGE, size, 1, 1, 1, 0, 0, 0) + struct.pack("<I", 0)
+with open(sys.argv[1], "wb") as out:
+    out.write(header + image)
+PY
+  for name in default arrow top_left_arrow text xterm pointer hand1 hand2 grab grabbing wait watch progress \
+    left_ptr_watch crosshair not-allowed move all-scroll col-resize row-resize; do
+    ln -s left_ptr "$dir/$name"
+  done
+  printf '[Icon Theme]\nName=default\nComment=FloppyOctoTouch: invisible cursor\n' \
+    >"$FOT_PREFIX/cursors/default/index.theme"
+}
+
 install_files() {
   mkdir -p "$FOT_PREFIX"
   replace_dir "$FRONTEND_SRC" "$FOT_PREFIX/frontend"
@@ -336,6 +360,7 @@ install_files() {
     AGENT_SRC=$FOT_PREFIX/agent
   fi
   printf '%s\n' "$VERSION" >"$FOT_PREFIX/VERSION"
+  install_cursor_theme
   for doc in README.md LICENSE CHANGELOG.md; do
     if [ -f "$SRC_DIR/$doc" ] && ! [ "$SRC_DIR/$doc" -ef "$FOT_PREFIX/$doc" ]; then
       cp -- "$SRC_DIR/$doc" "$FOT_PREFIX/$doc"

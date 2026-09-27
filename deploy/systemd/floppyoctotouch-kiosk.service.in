@@ -26,6 +26,10 @@ UtmpMode=user
 Environment=XDG_SESSION_TYPE=wayland
 # Start even when the touch screen's USB cable is not plugged in yet.
 Environment=WLR_LIBINPUT_NO_DEVICES=1
+# Invisible cursor theme written by install.sh: no arrow in the middle of the touch screen.
+Environment=XCURSOR_PATH=@PREFIX@/cursors
+Environment=XCURSOR_THEME=default
+Environment=XCURSOR_SIZE=24
 EnvironmentFile=-/etc/floppyoctotouch/kiosk.env
 # -s: allow switching to another VT (Ctrl+Alt+F2 with a keyboard) for troubleshooting.
 ExecStart=/usr/bin/cage -s -- @PREFIX@/deploy/kiosk/kiosk.sh

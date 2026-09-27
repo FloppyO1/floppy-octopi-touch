@@ -126,6 +126,10 @@ check "getty@tty1 disabled" test ! -e /etc/systemd/system/getty.target.wants/get
 check "units rendered for pi (uid 1000)" grep -q '^Environment=XDG_RUNTIME_DIR=/run/user/1000$' \
   /etc/systemd/system/floppyoctotouch-agent.service
 check "kiosk unit runs cage as pi" grep -q '^User=pi$' /etc/systemd/system/floppyoctotouch-kiosk.service
+check "kiosk unit uses the invisible cursor theme" grep -q "^Environment=XCURSOR_PATH=$PREFIX/cursors$" \
+  /etc/systemd/system/floppyoctotouch-kiosk.service
+check_eq "invisible cursor: 1x1 Xcursor file" "Xcur 68" \
+  "$(head -c4 $PREFIX/cursors/default/cursors/left_ptr) $(stat -Lc %s $PREFIX/cursors/default/cursors/default)"
 if ! systemd-analyze verify --man=no /etc/systemd/system/floppyoctotouch-agent.service \
   /etc/systemd/system/floppyoctotouch-kiosk.service 2>/tmp/verify.log; then
   cat /tmp/verify.log
