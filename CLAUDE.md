@@ -66,7 +66,8 @@ agent/floppyoctotouch_agent/   config.py, proxy.py (OctoPrint + /webcam), displa
                                commands.py (run_command for external programs), system.py (/proc, /sys, nmcli),
                                control.py (/local/system, /local/apikey, /local/kiosk/restart),
                                thumbnails.py (G-code thumbnails + disk cache), usb.py (sticks, import, watcher),
-                               files.py (/local/thumbnail, /local/usb*, /local/events SSE),
+                               files.py (/local/thumbnail, /local/objects, /local/usb*, /local/events SSE),
+                               objects.py (labelled objects of a G-code file + footprint, disk cache),
                                __main__.py; tests in agent/tests
 frontend/src/lib/api/          http.ts, octoprint.ts (typed REST), agent.ts (/local/*), socket.ts, types.ts
 frontend/src/lib/core/         pure logic + tests: capabilities (M115), hostActions, tempHistory, files,
@@ -78,10 +79,10 @@ frontend/src/lib/core/         pure logic + tests: capabilities (M115), hostActi
                                mesh (LevelingParser: M420 V / G29 reports, stats, colour scale), leveling (paper
                                test points, G-code, G28/M84 detection), system (usage/heat tones, network
                                summary, system command order, HTML confirm → text), power (PSU state, custom
-                               actions: validation, sanitising)
+                               actions: validation, sanitising), objects (cancel method, object list, bed geometry)
 frontend/src/lib/stores/       *.svelte.ts singletons (connection, printer/job, temperatures, files, usb, terminal,
                                events, capabilities, prompt, server, settings, nav, clock, tune, notices, idle,
-                               leveling, system (polled only while watched), power (PSU Control))
+                               leveling, system (polled only while watched), power (PSU Control), objects (cancel objects))
                                + dataLayer.ts (socket wiring)
 frontend/src/lib/i18n/         en.json, it.json, index.svelte.ts (t(), setLocale())
 frontend/src/lib/ui/           design system: tokens.css, components (Button, Card, Modal, NumPad, OnScreenKeyboard, Thumb,
@@ -89,7 +90,7 @@ frontend/src/lib/ui/           design system: tokens.css, components (Button, Ca
                                press.ts, theme.ts, kiosk.ts
 frontend/src/shell/            Shell, Sidebar, StatusBar, ConnectionOverlay, PrinterOverlay, Screensaver, NoticeDialog,
                                screens.ts (registry)
-frontend/src/screens/          Home + home/ (JobView, IdleView, Preview, StatusRows, actions.ts), Files + files/
+frontend/src/screens/          Home + home/ (JobView, IdleView, Preview, StatusRows, ObjectsDialog, actions.ts), Files + files/
                                (view state, items, FileGrid, FileDetail, UsbDetail, ImportProgress, actions.ts),
                                Temperature + temperature/ (HeaterCard, TempChart = uPlot, PresetManager/Editor),
                                Move + move/actions.ts, Filament + filament/ (flow.svelte.ts wizard state, Wizard,
@@ -107,6 +108,7 @@ dev/e2e/screenshot.mjs         Playwright smoke test/screenshots (own package.js
                                accents.mjs = screenshots of every accent variant
 dev/sample-gcode/              samples with PrusaSlicer PNG/QOI and OrcaSlicer thumbnails (dev/tools/make_sample_gcode.py)
                                + 3dbenchy_prusaslicer.gcode (real export, Tatara A8 profile, 300x300 PNG, ~45 min)
+                               + four-objects_prusaslicer.gcode / four-objects-m486_prusaslicer.gcode (cancel objects)
 dev/fake-usb/                  mounted read-only in the agent as /media/usb0, writable in playwright (/fake-usb)
 dev/fake-webcam/server.py      MJPEG test pattern (ffmpeg testsrc) on :8080, service `webcam`
 deploy/                        install.sh, update.sh, uninstall.sh, lib/common.sh, systemd/*.service.in, pam/, udev/,
@@ -199,6 +201,14 @@ dev/deploy-test/               installer test on Debian bookworm (run.sh, fake_o
 - The dev OctoPrint has `echo` reboot/shutdown commands and a custom `lights` system command (seed + applied once
   through `/api/settings`); the smoke test still intercepts `POST /api/system/commands/core/*`. PSU Control is
   not installed: the smoke test fakes its `plugins` key in `/api/settings` and its SimpleApi with `page.route`.
+- Cancel Objects plugin (0.6.4, installed by `init.sh` in dev, by `install.sh` on the Pi through the Plugin Manager
+  API, then OctoPrint must restart): it rewrites G-code **when a file is uploaded** (`@Object` / `@Objectstop`), so
+  files uploaded before it was installed cannot be cancelled (the app shows an "upload it again" hint). Its SimpleApi
+  is `POST /api/plugin/cancelobject` (`objlist`, `cancel` with `cancelled: <id>`, ids by first appearance in the
+  file); the plugin list is `GET /plugin/pluginmanager/plugins` (not under `/api`). Marlin `M486` has no answer and
+  M115 does not report it: the `cancelObjects` capability is a manual override (smoke test: `setOverrides()`).
+- M486 state comes only from live `Send: M486 …` lines, never from the `history` replay (it can hold an old
+  print's `M486 P`). `M486 A<name>` must not be parsed for parameters: names like "copy 1" contain a `C`.
 - The agent's `/local/apikey` writes the key into `config_path` (`FOT_CONFIG`, default
   `~/.config/floppyoctotouch/config.json`); in Docker `FOT_API_KEY` wins again at the next start.
 - Deploy scripts: after changing anything in `deploy/` rebuild the tarball (`run --rm release`) before
@@ -221,6 +231,9 @@ installer itself (idempotent; from a clone it installs the tarball in `release/`
 Chromium on tty1 via a PAM/logind session), read-only USB automount (udev + `systemd-mount` on `/media/usb-<label>`),
 sudo rule for eject/kiosk restart, optional display lines in `config.txt`/`cmdline.txt`,
 `floppyoctotouch-update`/`-uninstall`, release build and a bookworm installer test (100 checks). Not yet run on a real
-Pi. Before: every screen (sessions 3-8). Next: session 10 (real Pi checklist and polish).
+Pi. Before: every screen (sessions 3-8). Session 10 (real Pi checklist and polish) in progress on `main`.
+Branch `session-11` (cancel objects: agent `/local/objects`, Home "Objects" dialog, M486 or the Cancel Objects plugin,
+installer question; installer test 127 checks): code and docs done, waiting for the test on the Pi with the printer;
+merged into `main` after v1.0.0, then released as v1.1.0.
 Repository: `https://github.com/FloppyO1/floppy-octopi-touch` (README clone commands, About screen).
 See `docs/PLAN.md` for details and notes between sessions.

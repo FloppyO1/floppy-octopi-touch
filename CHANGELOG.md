@@ -6,6 +6,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Cancel single objects during a print: an "Objects n/m" button on Home opens a bed map (printer profile size,
+  the objects' outlines, current object highlighted, cancelled ones struck through) and a list; each cancel asks
+  for confirmation, and the last object left cannot be cancelled. It uses Marlin `M486` when the firmware has
+  `CANCEL_OBJECTS` (manual switch in System → Settings → Firmware, M115 does not report it) or the Cancel Objects
+  OctoPrint plugin; files uploaded before the plugin was installed get an "upload it again" hint.
+- Agent `GET /local/objects`: the labelled objects of a G-code file (Cancel Objects plugin, PrusaSlicer/OrcaSlicer
+  "OctoPrint comments", `M486`, Cura, Klipper) with their outline on the bed (from the file or the convex hull of
+  the extrusion moves), cached on disk like the thumbnails.
+- Installer: offers the Cancel Objects plugin (pinned version 0.6.4, Enter = yes) through OctoPrint's Plugin
+  Manager API; OctoPrint is restarted only when it is not printing; `--no-cancel-plugin`. A key without admin
+  rights or no network only warns with the manual steps. `uninstall.sh` offers to remove the plugin only when
+  the installer added it.
+- Dev: the Cancel Objects plugin in the OctoPrint container, four-object samples (PrusaSlicer comments and
+  `M486`), smoke test and installer test steps for both paths.
+
+### Fixed
+- Smoke test: the move step no longer depends on a Virtual Printer race that sometimes ran a jog as an absolute
+  move.
+
 ## [0.9.1] - 2026-09-27
 
 ### Added

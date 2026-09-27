@@ -1203,3 +1203,19 @@ _(ogni sessione aggiunge qui decisioni prese, deviazioni dal piano, problemi ape
     stampante (3-4 oggetti, toglierne uno), poi chiusura dopo la 1.0.0 (merge in `main`, v1.1.0).
   - Sessione 10 ancora `[~]` su `main`: restano i punti 1-5 della checklist (stampante, SD/M300, host prompt, USB,
     webcam) e le rifiniture annotate sopra.
+- **Ripresa (2026-09-27, stessa giornata)**:
+  - smoke test completo rilanciato: **verde** (3m21s). Il fallimento del passo `move` era una **race della Virtual
+    Printer** (vista nel sorgente `virtual.py`): legge il flag relativo quando il thread del buffer esegue il
+    movimento, quindi il `G90` che OctoPrint manda subito dopo ogni jog a volte rende assoluto anche un singolo jog
+    (X = 50 invece di 60), qualunque sia la pausa fra i jog. Il passo ora parte da una X nota (`G92 X200` +
+    `read-position`), controlla subito il jog limitato a 220 (e `G0 X20` nel terminale in dev) e rimette `G92 X220`;
+    6/6 verdi in dev e 2/2 sulla build dell'agent. Gotcha di CLAUDE.md corretto.
+  - deploy-test: aggiunte la risposta "no" alla domanda del plugin e `--no-cancel-plugin` (mancavano rispetto al
+    piano): **127/127**. 90 pytest, 148 vitest, svelte-check e shellcheck puliti.
+  - ARCHITECTURE (modulo `objects.py`, endpoint `/local/objects`, sezione "Cancel objects", installer, dev,
+    deploy-test), CHANGELOG (voce "Unreleased"), CLAUDE.md (layout, gotcha del plugin e di M486, stato) aggiornati.
+  - Limite noto documentato: con M486, dopo un ricaricamento dell'app a metà stampa si riconosce di nuovo solo
+    l'oggetto corrente (gli annullati non sono nel log dal vivo; la cronologia viene ignorata di proposito).
+  - **Resta**: verifica sul Pi con la stampante (stop intermedio: stampa di 3-4 oggetti piccoli, annullarne uno;
+    il file va caricato **dopo** l'installazione del plugin), poi dopo la chiusura della 10 (v1.0.0 su `main`):
+    merge del branch, bump a 1.1.0, tarball, tag `v1.1.0`.

@@ -43,6 +43,7 @@ Package `agent/floppyoctotouch_agent`:
 | `system.py` | `SystemInfo`: CPU usage from two `/proc/stat` samples (the previous request's, or two 250 ms apart when older than 30 s), SoC temperature (`/sys/class/thermal`, the `cpu` zone first), frequency (`cpufreq`), load, memory (`MemAvailable`), disk (`statvfs` of `disk_path`, like `df`), interfaces (`/sys/class/net` without lo/docker/veth/bridges, IPv4 via `SIOCGIFADDR`), default route and gateway (`/proc/net/route`), Wi-Fi SSID/signal from `nmcli -t … device wifi list --rescan no` (cached 10 s, not retried when missing) or the link quality of `/proc/net/wireless` |
 | `control.py` | `ControlApi`: `/local/system`, `/local/apikey` (validation on OctoPrint, `save_config_values()` into the config file with mode 600, used at once by the proxy and the files API), `/local/kiosk/restart` |
 | `thumbnails.py` | `ThumbnailScanner` (line by line, stops at the first G-code command, largest valid image wins), QOI decoder and PNG encoder (standard library only), `ThumbnailCache` on disk (`<data_dir>/thumbnails/<sha1>.png\|.jpg`, `.none` for files without a thumbnail, 1000 entries, one extraction at a time) |
+| `objects.py` | printed objects of a G-code file for "cancel object": labels of the Cancel Objects plugin (`@Object` / `@Objectstop`, written when it rewrites an upload), slicer comments (`; printing object` / `; stop printing object`), `M486 S<n>` + `M486 A<name>`, Cura `;MESH:`, Klipper `EXCLUDE_OBJECT_*`; footprint = the outline shipped by the file (PrusaSlicer `; objects_info`, Klipper `POLYGON=`) or the convex hull of the extrusion moves (0.5 mm grid); `ObjectCache` on disk (`<data_dir>/objects/<sha1>.json`, key = path + size + mtime, 200 entries, 512 MiB scan limit) |
 | `usb.py` | `UsbManager`: mounts matching `usb_roots`, G-code listing (depth 5, 1000 files, system folders skipped), `resolve()` that confines every path to its mount (no `..`, no symlinks out), eject command; streamed multipart body with a known length for the import; `EventHub` + `UsbWatcher` (mount polling every 2 s) |
 | `files.py` | `FilesApi`: the thumbnail, USB and event endpoints, `ApiError` → JSON `{error, detail}` middleware |
 | `settings.py` | `SettingsStore`: one JSON document (`<data_dir>/settings.json`), defaults when missing or corrupted, atomic writes, 256 KiB limit |
@@ -59,6 +60,7 @@ Package `agent/floppyoctotouch_agent`:
 | GET | `/local/display` | `{on, backend, output}` |
 | PUT | `/local/display` | `{"on": false}` / `{"on": true}` switches the HDMI output; 503 with `detail` if `wlr-randr` fails |
 | GET | `/local/thumbnail?path=<local path>&v=<date>` | thumbnail of a file of OctoPrint's local storage as PNG/JPEG (cached; `v` busts the browser cache), 404 `no_thumbnail`; read from `uploads_dir`, or streamed from `/downloads/files/local/…` when that folder is not readable |
+| GET | `/local/objects?path=<local path>` | `{objects: [{name, m486, polygon: [[x, y], …], center, bbox: [minX, minY, maxX, maxY]}], labels, processed, truncated}`: objects in order of first appearance, `m486` = their `M486` index (or `null`), `labels` = formats found (`plugin`, `comments`, `m486`, `cura`, `klipper`), `processed` = rewritten by the Cancel Objects plugin; only read from `uploads_dir` (404 `no_such_file` otherwise: no download fallback) |
 | GET | `/local/usb` | `{mounts: [{id, name}], files: [{mount, path, name, size, date}]}` |
 | GET | `/local/usb/thumbnail?mount=<id>&path=<path>` | thumbnail of a file on a stick |
 | POST | `/local/usb/import` | `{mount, path, folder}` → uploads the file to `/api/files/local` (so OctoPrint analyses it) and streams NDJSON: `{sent, total}` every 250 ms, then `{done, name, path}` or `{error}`; closing the request cancels the upload; 413 above `usb_max_file_mb` |
@@ -84,7 +86,7 @@ icons are bundled.
 | Folder | Content |
 |---|---|
 | `src/lib/api/` | transport: `http.ts` (JSON helpers, path encoding), `octoprint.ts` (typed REST client), `agent.ts` (`/local/*`), `socket.ts` (push API), `types.ts` (OctoPrint 1.11 types) |
-| `src/lib/core/` | pure, unit-tested logic: M115 capabilities, host action parser, temperature ring buffer, file tree helpers (recent files, thumbnails, sort, search, breadcrumbs), printer phase/tone and plugin detection, settings schema/migrations, formatting, gauge geometry, NumPad entry, keyboard layouts, overrides from the log (`tune`), DisplayLayerProgress layers (`layer`), webcam source (`webcam`), idle levels (`idle`), print notices (`notices`), presets validation (`presets`), generic list operations (`lists`), jog limits (`move`), filament sequences (`filament`), chart colours (`chart`), terminal filters and history (`terminal`), macros (`macros`), mesh parser and stats (`mesh`), paper test points and leveling G-code (`leveling`) |
+| `src/lib/core/` | pure, unit-tested logic: M115 capabilities, host action parser, temperature ring buffer, file tree helpers (recent files, thumbnails, sort, search, breadcrumbs), printer phase/tone and plugin detection, settings schema/migrations, formatting, gauge geometry, NumPad entry, keyboard layouts, overrides from the log (`tune`), DisplayLayerProgress layers (`layer`), webcam source (`webcam`), idle levels (`idle`), print notices (`notices`), presets validation (`presets`), generic list operations (`lists`), jog limits (`move`), filament sequences (`filament`), chart colours (`chart`), terminal filters and history (`terminal`), macros (`macros`), mesh parser and stats (`mesh`), paper test points and leveling G-code (`leveling`), cancel objects: mechanism, object list, bed geometry (`objects`) |
 | `src/lib/stores/` | Svelte 5 stores (classes with `$state`/`$derived`, one singleton each) and `dataLayer.ts`, which wires the socket to them |
 | `src/lib/i18n/` | `en.json`, `it.json`, `t()`, `setLocale()` (default English) |
 | `src/lib/ui/` | design system: tokens, components, `dialogs`/`toast` services, `pressable` attachment, theme (accent) and kiosk helpers |
@@ -149,6 +151,28 @@ the client never uses them and always builds relative paths.
   screen in the last 60 s (`job.local`). `PrintResumed` closes a pause notice, `PrintStarted` any notice.
 - **Screensaver thumbnail**: with `screensaver.showThumbnail` the printing view puts the file thumbnail (~220 px)
   left of the percentage; without a thumbnail the layout stays the plain one.
+
+### Cancel objects
+
+- **Mechanism** (`core/objects.ts` `cancelMethod()`): `m486` when the `cancelObjects` capability is on (Marlin
+  `CANCEL_OBJECTS`; M115 does not report it, so it is a manual override in the settings, default off), else
+  `plugin` when the Cancel Objects OctoPrint plugin (`cancelobject`) is loaded (its key in `/api/settings` →
+  `plugins`, like PSU Control), else `none` (no button). M486 wins: the firmware skips the moves itself.
+- **Shapes** from the agent (`GET /local/objects`, local storage only), requested by `stores/objects.svelte.ts`
+  when the job's file changes (path + date). Matched to the live objects by name (`M486` index with `m486`).
+- **State**: with the plugin, its `plugin` socket messages (`{"objects": […]}`, `{"ActiveID": id}`) plus
+  `POST /api/plugin/cancelobject {"command": "objlist"}` when the file changes or the app loads mid-print;
+  entries with `ignore: true` (start/end G-code) are hidden. With M486, the live `Send: M486 S<n>` lines give the
+  current object and `M486 P<n>` the cancelled ones; the `history` replay is ignored (it may hold another print's
+  lines), so after a reload mid-print only the current object is known again. `PrintStarted` resets it.
+- **Cancel**: `M486 P<index>` or `{"command": "cancel", "cancelled": <id>}` (the plugin's ids follow the first
+  appearance in the file). The plugin only works on files it rewrote at upload (`@Object` lines): for a file with
+  objects but without them (`processed: false`) the button opens a hint to upload the file again.
+- **UI** (`home/JobView` + `home/ObjectsDialog`): "Objects n/m" button next to Pause/Stop while printing, when at
+  least 2 objects can be cancelled. The dialog shows the bed of the printer profile (origin lower left or
+  centre) in SVG with the footprints (hit areas at least 56 px, current object highlighted, cancelled ones grey
+  and struck through) and the list (names without the slicer's `id:N copy M`, same names numbered). Each cancel
+  asks for confirmation; the last object left cannot be cancelled (Stop ends the print). No restore in v1.
 
 ### Files
 
@@ -335,13 +359,14 @@ All questions come first, before apt and pip; after "No more questions" it runs 
 | root | not root → `exec sudo -- bash <script> <args>` (`sudo -n` with `--non-interactive`; `ensure_root` in `common.sh`, also used by update/uninstall), so `./deploy/install.sh` and `bash deploy/install.sh` (executable bit lost) both work |
 | payload | release layout (`VERSION`, `frontend/index.html`, wheel) or a checkout with `frontend/dist`; a plain clone runs the bundled `release/*.tar.gz` instead (checksum, extracted to a temp dir, same options) |
 | checks | bookworm, arm64/armhf (other architectures only warn: test containers), `octoprint.service` read with `systemctl cat` or from the unit files: `User=` (taken without asking; asked only when there is no unit), `--port`, `--basedir` (→ `uploads_dir`); OctoPrint's `/api/version` polled for up to 10 s |
-| questions | API key first (instructions with the Pi's real address; hidden input, whitespace stripped, format `[A-Za-z0-9_-]{16,128}`, checked on `/api/version`: 200 accepted, 401/403 asked again without limit, no answer → saved unchecked, empty → entered later on the touch screen); a saved key that OctoPrint still accepts is kept without asking; `--listen-lan` confirmation; display settings (default yes); reboot at the end (default yes only when the display settings are added) |
+| questions | API key first (instructions with the Pi's real address; hidden input, whitespace stripped, format `[A-Za-z0-9_-]{16,128}`, checked on `/api/version`: 200 accepted, 401/403 asked again without limit, no answer → saved unchecked, empty → entered later on the touch screen); a saved key that OctoPrint still accepts is kept without asking; `--listen-lan` confirmation; Cancel Objects plugin (only on a new install, when it is missing and a key is known; default yes; `--no-cancel-plugin` skips it, `--non-interactive` installs it); display settings (default yes); reboot at the end (default yes only when the display settings are added) |
 | packages | `cage`, `chromium` or `chromium-browser` (whichever is installed or has an apt candidate), `python3-venv`, `wlr-randr`, `fonts-dejavu-core`, `curl`; `apt-get update` only when something is missing |
 | files | `/opt/floppyoctotouch/{frontend,agent,deploy,VERSION}` replaced as new directories (running scripts keep their copy), root-owned; venv in `/opt/floppyoctotouch/venv` (recreated when the system Python changes), agent force-reinstalled from the wheel; `/usr/local/bin/floppyoctotouch-{update,uninstall}` |
 | config | `~/.config/floppyoctotouch/config.json` (dir 700, file 600, owned by the user): only the managed keys are replaced (`octoprint_url`, `host`, `static_dir`, `uploads_dir`, `usb_roots` = `/media/usb-*`, `usb_eject_command`, `kiosk_restart_command`, `display_backend` = `wlr-randr`, `display_output` from the connected `/sys/class/drm/card*-HDMI-A-*`), `api_key` only when a new one was given and accepted by `/api/version` |
 | system files | units rendered from `deploy/systemd/*.in` (`@USER@`, `@UID@`, `@HOME@`, `@PREFIX@`, …), PAM file, `/etc/floppyoctotouch/kiosk.env` (kept once created), sudoers checked with `visudo -c`, udev rule, groups `video`/`render`/`input`; units enabled, `getty@tty1` disabled |
+| plugin | Cancel Objects 0.6.4 (pinned) through `POST /api/plugin/pluginmanager {"command": "install", "url": …}` like OctoPrint's own button; the version is followed in OctoPrint's Python (`importlib.metadata`, up to 5 min), then OctoPrint is restarted unless `/api/job` reports a print (then a warning). 401/403 (key of a non-admin user) or any other error only warns with the manual steps |
 | display | block between `# >>> FloppyOctoTouch display >>>` markers appended to `config.txt` (`hdmi_group=2`, `hdmi_mode=87`, `hdmi_cvt 1024 600 60 6 0 0 0`, …) and `video=<output>:1024x600@60` appended to `cmdline.txt`, each with a timestamped backup, only when missing |
-| state | `/etc/floppyoctotouch/install.conf`: version, user, LAN flag, the `cmdline.txt` token actually added |
+| state | `/etc/floppyoctotouch/install.conf`: version, user, LAN flag, the `cmdline.txt` token actually added, whether it installed the Cancel Objects plugin, OctoPrint URL and Python |
 | start | without systemd as PID 1 (containers) units are only enabled; otherwise agent restarted, `/local/health` polled for 20 s; then, if a reboot was asked for, a 10 s countdown (Ctrl+C cancels it, trapped `SIGINT`) and `systemctl reboot`, else the kiosk is restarted |
 
 Runtime on the Pi:
@@ -359,18 +384,19 @@ Runtime on the Pi:
 version only with a confirmation or `--force`) and runs the new `install.sh --update --user=<saved>` (no key or
 display questions, `kiosk.env`, `config.json` and `settings.json` kept). `deploy/uninstall.sh` stops and removes
 the units, re-enables `getty@tty1`, removes udev/sudoers/PAM files, the display block and the recorded
-`cmdline.txt` token (with backups), `/opt/floppyoctotouch` and `/etc/floppyoctotouch`; the configuration only
+`cmdline.txt` token (with backups), the Cancel Objects plugin (only when the installer added it, after a question, default no, through the Plugin Manager), `/opt/floppyoctotouch` and `/etc/floppyoctotouch`; the configuration only
 with `--purge` or a yes.
 
 `dev/deploy-test/run.sh` (service `deploy-test`, `debian:bookworm` with `cage` and `chromium` preinstalled, no
 systemd as PID 1) fakes an OctoPi (`pi` user, `octoprint.service`, boot files, a stand-in OctoPrint answering
-`/api/version`) and checks install, config, units (`systemd-analyze verify`), sudo rules, groups, boot files,
+`/api/version`, `/api/job` and a Plugin Manager that only accepts the admin key) and checks install, config, units (`systemd-analyze verify`), sudo rules, groups, boot files,
 the agent running with the installed config, the kiosk launcher with a fake Chromium, the USB helper with a fake
 `systemd-mount`, a second run (idempotence), update, uninstall, the install from a clone, self-elevation of
 install/update/uninstall from `pi` (passwordless sudo like OctoPi, installer without its executable bit) and
 interactive runs on a fake terminal: `dev/deploy-test/drive.py` answers each question in order (regex + reply),
 fails on any question printed after "Installing packages", and can send Ctrl+C (key refused then accepted, empty
-key, reinstall keeping the saved key, reboot countdown cancelled or run out).
+key, reinstall keeping the saved key, reboot countdown cancelled or run out, Cancel Objects plugin: yes, no, key
+without admin rights, OctoPrint printing, `--no-cancel-plugin`, uninstall keeping or removing it).
 
 ## Development environment
 
@@ -378,7 +404,7 @@ key, reinstall keeping the saved key, reboot countdown cancelled or run out).
 
 | Service | Image | Notes |
 |---|---|---|
-| `octoprint-init` | `octoprint/octoprint:1.11.8` | one-shot: merges `dev/octoprint/config.yaml` into the image's config (first start only), copies `dev/sample-gcode` (plus `examples/` folder and a virtual SD file), creates the admin user, registers `OCTOPRINT_API_KEY` as an application key |
+| `octoprint-init` | `octoprint/octoprint:1.11.8` | one-shot: merges `dev/octoprint/config.yaml` into the image's config (first start only), copies `dev/sample-gcode` (plus `examples/` folder and a virtual SD file), creates the admin user, registers `OCTOPRINT_API_KEY` as an application key, installs the Cancel Objects plugin 0.6.4 (pinned, like the installer) |
 | `octoprint` | `octoprint/octoprint:1.11.8` | OctoPrint on port 5000 (haproxy on 80 is not used), Virtual Printer with SD, volume `octoprint-data` |
 | `webcam` | `octoprint/octoprint:1.11.8` (for its ffmpeg) | `dev/fake-webcam/server.py`: MJPEG test pattern on 8080 (`/?action=stream`, `/?action=snapshot`) |
 | `agent` | `dev/docker/agent.Dockerfile` (Python 3.11) | source mounted, hot reload with `watchfiles` (polling), `dev/fake-usb` mounted as `/media/usb0` (eject command `none`), OctoPrint's volume read-only for the thumbnails (`FOT_UPLOADS_DIR`), webcam → `http://webcam:8080`, display backend `none` |
