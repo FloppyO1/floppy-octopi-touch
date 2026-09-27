@@ -117,7 +117,11 @@ services:
     volumes:
       - ../agent:/app
       - ./sample-gcode:/samples:ro
-    command: sh -c "ruff check . && ruff format --check . && pytest -q"
+      - ./deploy-test:/deploy-test:ro
+    # Also lints the Python helpers of the installer test (dev/deploy-test) with the agent's ruff settings.
+    command: >-
+      sh -c "ruff check --config pyproject.toml . /deploy-test
+      && ruff format --check --config pyproject.toml . /deploy-test && pytest -q"
 
   frontend-test:
     profiles: [tools]

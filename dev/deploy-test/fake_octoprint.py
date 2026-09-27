@@ -1,4 +1,4 @@
-"""OctoPrint stand-in for the installer test: /api/version answers 200 with the API key, 403 without."""
+"""OctoPrint stand-in for the installer test: /api/version is 200 with the API key, 403 without."""
 
 import json
 import sys

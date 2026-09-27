@@ -98,6 +98,8 @@ check "fake OctoPrint on :5000" wait_url "http://127.0.0.1:5000/robots.txt"
 section "install.sh --non-interactive --api-key=…"
 bash "$src/deploy/install.sh" --non-interactive --api-key="$KEY"
 
+check "install.sh is executable in the tarball" bash -c \
+  "tar -tvzf $tarball | grep -Eq '^-rwxr-xr-x .* floppyoctotouch-$version/deploy/install.sh$'"
 check_eq "installed version" "$version" "$(cat $PREFIX/VERSION)"
 check "web app in $PREFIX/frontend" test -f $PREFIX/frontend/index.html
 check_eq "agent in the venv" "$version" "$($PREFIX/venv/bin/floppyoctotouch-agent --version)"
@@ -253,6 +255,67 @@ sed -i 's/^./0/' "$clone/release/floppyoctotouch-$version.tar.gz.sha256"
 check "damaged bundled tarball refused" bash -c "! bash $clone/deploy/install.sh --non-interactive 2>/dev/null"
 floppyoctotouch-uninstall --non-interactive --purge
 check "configuration deleted with --purge" test ! -e /home/pi/.config/floppyoctotouch
+
+section "not root: 'bash deploy/install.sh' without the executable bit runs itself through sudo"
+# OctoPi's default user may use sudo without a password.
+echo 'pi ALL=(ALL) NOPASSWD: ALL' >/etc/sudoers.d/010_pi-nopasswd
+chmod 440 /etc/sudoers.d/010_pi-nopasswd
+noexec=/tmp/clone-noexec
+mkdir -p "$noexec/release" /tmp/pub
+cp -r "$clone/deploy" "$clone/agent" "$noexec/"
+cp "$work/floppyoctotouch-$version.tar.gz" "$work/floppyoctotouch-$version.tar.gz.sha256" "$noexec/release/"
+cp "$work/floppyoctotouch-$version.tar.gz" "$work/floppyoctotouch-$version.tar.gz.sha256" /tmp/pub/
+find "$noexec" -type f -exec chmod 644 {} +
+chmod -R a+rX "$noexec" /tmp/pub
+check "install.sh has lost its executable bit" test ! -x "$noexec/deploy/install.sh"
+status=0
+runuser -u pi -- bash "$noexec/deploy/install.sh" --non-interactive --api-key="$KEY" --skip-display-config \
+  >/tmp/elevate.log 2>&1 || status=$?
+check_eq "installed by pi" 0 "$status"
+check "said it runs itself again with sudo" grep -q "running it again with sudo" /tmp/elevate.log
+check_eq "installed version" "$version" "$(cat $PREFIX/VERSION)"
+check_eq "config.json mode and owner" "600 pi" "$(stat -c '%a %U' $CONFIG)"
+check "update.sh from pi runs itself through sudo" \
+  runuser -u pi -- floppyoctotouch-update --non-interactive --force "/tmp/pub/floppyoctotouch-$version.tar.gz"
+check "uninstall.sh from pi runs itself through sudo" runuser -u pi -- floppyoctotouch-uninstall --non-interactive --purge
+check "uninstalled" test ! -e $PREFIX -a ! -e /home/pi/.config/floppyoctotouch
+
+# Interactive runs on a fake terminal: every question must come before apt starts ("Installing packages").
+drive() { python3 /test/drive.py --no-prompt-after "Installing packages" "$@"; }
+
+section "interactive install: key refused, then accepted; Ctrl+C cancels the reboot"
+status=0
+drive --transcript /tmp/drive1.log --interrupt-on "Ctrl+C to cancel" --answers "$(printf '%s' \
+  '[["API key", "not a key"], ["API key", "wrong-key-0123456789abcdef"], ["API key", " '"$KEY"' "],' \
+  ' ["display settings", ""], ["Reboot automatically", ""]]')" -- bash "$src/deploy/install.sh" || status=$?
+check_eq "installer finished, questions only at the start, user not asked" 0 "$status"
+check "shows where to create the key" grep -q "Settings (wrench icon at the top) > Application Keys" /tmp/drive1.log
+check "bad format asked again" grep -q "does not look like an API key" /tmp/drive1.log
+check "refused key asked again" grep -q "OctoPrint rejected that key" /tmp/drive1.log
+check_eq "accepted key saved (spaces removed)" "$KEY" "$(config_value api_key)"
+check_eq "display settings added (Enter = yes)" 1 "$(count '# >>> FloppyOctoTouch display >>>' $BOOT/config.txt)"
+check "reboot countdown cancelled with Ctrl+C" grep -q "reboot cancelled: starting the dashboard now" /tmp/drive1.log
+
+section "interactive reinstall: saved key kept without asking, reboot after the countdown"
+status=0
+drive --transcript /tmp/drive2.log --answers '[["Reboot automatically", "y"]]' -- bash "$src/deploy/install.sh" ||
+  status=$?
+check_eq "only the reboot question" 0 "$status"
+check "saved key kept" grep -q "still accepted by OctoPrint: kept" /tmp/drive2.log
+check "countdown ran out (no systemd here, so no reboot)" \
+  grep -q "systemd is not running (container?): not rebooting" /tmp/drive2.log
+floppyoctotouch-uninstall --non-interactive --purge
+
+section "interactive install without a key (Enter): the touch screen asks for it"
+status=0
+drive --transcript /tmp/drive3.log \
+  --answers '[["API key", ""], ["display settings", "n"], ["Reboot automatically", ""]]' \
+  -- bash "$src/deploy/install.sh" || status=$?
+check_eq "installer finished" 0 "$status"
+check "warned about the missing key" grep -q "the touch screen asks for it" /tmp/drive3.log
+check_eq "no key in config.json" null "$(config_value api_key)"
+check "display settings declined" cmp /tmp/config.txt.orig $BOOT/config.txt
+floppyoctotouch-uninstall --non-interactive --purge
 
 printf '\n%d passed, %d failed\n' "$PASSED" "$FAILED"
 [ "$FAILED" = 0 ]
