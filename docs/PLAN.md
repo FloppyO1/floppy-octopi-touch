@@ -106,7 +106,7 @@ Procedura:
 - **Dev su Windows con Docker**: container OctoPrint con **Virtual Printer** + dev server della dashboard; **anteprima 1024×600** nel browser del PC per valutare la grafica.
 - **Tutto il tooling gira in Docker**: Node/npm (Vite, vitest, build), Python (agent, pytest, ruff), Playwright (screenshot), shellcheck. **Mai** `npm install` / `pip install` sul PC Windows, anche se Node 24 e Python 3.11 sono presenti. Comandi ricorrenti esposti come servizi/profili di `dev/docker-compose.yml` (es. `docker compose run --rm frontend npm test`) e documentati in README e CLAUDE.md. `node_modules` in un volume Docker (non nella cartella del PC) per prestazioni e pulizia.
 - **Verifica grafica**: Claude genera **screenshot automatici a 1024×600** con Playwright in un container (salvati in `dev/screenshots/`, ignorati da git salvo quelli per il README) e li esamina; l'utente controlla comunque nel browser.
-- **Versioning**: SemVer, parte da **0.1.0** a fine Sessione 1, **bump minor a ogni sessione** (0.2.0, 0.3.0…) con **tag git locale** e voce in `CHANGELOG.md` (formato Keep a Changelog); **v0.9.0** dopo l'installer (S9), **v1.0.0** dopo il test reale (S10). Versione unica mostrata in About, letta da `frontend/package.json` / `agent/pyproject.toml` (tenute allineate).
+- **Versioning**: SemVer, parte da **0.1.0** a fine Sessione 1, **bump minor a ogni sessione** (0.2.0, 0.3.0…) con **tag git locale** e voce in `CHANGELOG.md` (formato Keep a Changelog); **v0.9.0** dopo l'installer (S9), **v1.0.0** dopo il test reale (Sessione finale). Versione unica mostrata in About, letta da `frontend/package.json` / `agent/pyproject.toml` (tenute allineate).
 - **Identità git**: quella globale del PC (`FloppyO1 <thefloppylab@gmail.com>`); `LICENSE` MIT intestata a **Filippo Castellan, 2026**.
 - **Installazione sul Pi** con uno script `install.sh` (idempotente), più `update.sh` e `uninstall.sh`.
 
@@ -222,7 +222,7 @@ FloppyOctoTouch/
   ```
   feat(agent): add reverse proxy for /api and /sockjs
 
-  Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+  Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
   ```
   (il trailer va aggiornato se cambia il modello indicato dal sistema). Claude **non fa mai push**: il remote
   `github` (https://github.com/FloppyO1/floppy-octopi-touch) lo gestisce l'utente.
@@ -598,10 +598,15 @@ Leggi docs/PLAN.md e CLAUDE.md. Esegui la Sessione finale (io ho il Raspberry da
     kernel a 64 bit (`arm_64bit=1`, `uname -m` = `aarch64`);
   - rimozione di oggetti (Sessione 11): stampa di 3-4 oggetti piccoli, annullarne uno (file caricato DOPO
     l'installazione del plugin);
-  - punti 1-5 della Sessione 10 con la stampante vera: temperatura cambiata durante il riscaldamento iniziale (M108),
-    annulla che spegne il riscaldamento, cambia filamento, fine del carico riconosciuta al momento giusto,
-    raffreddamento automatico;
-  - installer: avviso del kernel a 32 bit (punto 6 della Sessione 10).
+  - punti 1-5 della Sessione 10 con la stampante vera: temperatura cambiata durante il riscaldamento iniziale (M108;
+    controllare nel log che il firmware riporti `Cap:EMERGENCY_PARSER:1`), annulla che spegne il riscaldamento,
+    cambia filamento, fine del carico riconosciuta al momento giusto (riga `echo:FOT-DONE …` dopo i movimenti; vedere
+    se il firmware ha `Cap:AUTOREPORT_POS`), raffreddamento automatico;
+  - installer: avviso del kernel a 32 bit (punto 6 della Sessione 10) e installazione senza le righe del display
+    (da v0.10.0 solo con `--display-config`): la risoluzione 1024×600 deve arrivare comunque dal kiosk;
+  - app scalata se lo schermo parte con un'altra modalità (es. Sistema → Impostazioni → Schermo senza confermare),
+    fluidità della Home con la webcam (tolto il blur sopra la webcam), primo caricamento della schermata Temperature
+    (grafico caricato a richiesta).
 - Correggere i bug trovati (se sono tanti, spezzare la sessione in parti con stop fra l'una e l'altra).
 - README finale con screenshot reali (controllare che non mostrino IP, SSID o altri dati), CHANGELOG.
 - Chiusura sessione (sezione 3) con versione 1.0.0 e tag v1.0.0 locale, poi FERMATI.
@@ -646,8 +651,8 @@ _Legenda: `[ ]` da fare · `[~]` in corso (interrotta se la trovi a inizio sessi
 - [x] Sessione 8 — Sistema e Impostazioni (2026-09-25, v0.8.0)
 - [x] Sessione 9 — Installazione sul Raspberry (2026-09-25, v0.9.0; interrotta una volta e ripresa lo stesso giorno)
 - [x] Sessione 9b — Installazione in un solo comando (2026-09-27, v0.9.1)
-- [~] Sessione 10 — Correzioni dal Pi e rifinitura, v0.10.0 (iniziata 2026-09-27 come "Test reale e rifinitura"; segnata `[~]` il 2026-09-25 senza lavoro fatto, rimessa `[ ]` per fare prima la 9b; riorganizzata il 2026-09-27: i test sul Pi sono nella Sessione finale; ripresa il 2026-10-02 dai punti 1-8)
-- [~] Sessione 11 — Rimozione di oggetti dalla stampa in corso, v0.11.0 (aggiunta il 2026-09-27 come v1.1.0; iniziata 2026-09-27 sul branch `session-11`, ora su `main`; manca solo la chiusura, la verifica sul Pi è nella Sessione finale)
+- [x] Sessione 10 — Correzioni dal Pi e rifinitura (iniziata 2026-09-27, ripresa e chiusa il 2026-10-02, v0.10.0; i test sul Pi sono nella Sessione finale)
+- [~] Sessione 11 — Rimozione di oggetti dalla stampa in corso, v0.11.0 (aggiunta il 2026-09-27 come v1.1.0; iniziata 2026-09-27 sul branch `session-11`, ora su `main`; manca solo la chiusura, la verifica sul Pi è nella Sessione finale; il codice è già nella v0.10.0)
 - [ ] Sessione finale — Test sul Raspberry reale e rilascio 1.0.0 (resta sempre l'ultima riga: le nuove sessioni si aggiungono sopra)
 
 ### Note tra sessioni
@@ -1183,7 +1188,7 @@ _(ogni sessione aggiunge qui decisioni prese, deviazioni dal piano, problemi ape
 - Comandi utili: `docker compose -f dev/docker-compose.yml run --rm release` poi `… run --rm deploy-test`; i
   transcript delle esecuzioni interattive sono in `/tmp/drive*.log` nel container (stampati anche nel log del test).
 
-**Sessione 10 — in corso (iniziata 2026-09-27; nota intermedia, da completare alla chiusura)**
+**Sessione 10 — Correzioni dal Pi e rifinitura (iniziata 2026-09-27, chiusa 2026-10-02, v0.10.0): prima parte**
 - Passo 1 (installazione sul Pi reale, OctoPi 1.1.0 armhf, utente rinominato in Raspberry Pi Imager): **ok** dopo tre
   correzioni, poi boot → kiosk automatico, schermo pieno, niente cursore, tocco preciso. Stampante non ancora collegata:
   il resto della checklist (stampante, SD, USB, webcam, M300, host prompt, HDMI off, prestazioni) è da fare.
@@ -1330,3 +1335,51 @@ _(ogni sessione aggiunge qui decisioni prese, deviazioni dal piano, problemi ape
   annulla del wizard filamento che spegne il riscaldamento, "Cambia filamento" (scarico + carico), passo di spurgo
   che compare prima della fine del carico, raffreddamento automatico a fine carico/scarico/cambio; aggiunti anche
   l'avviso dell'installer per il kernel a 32 bit, le rifiniture già annotate e la GitHub Action.
+
+**Sessione 10 — seconda parte e chiusura (2026-10-02, v0.10.0)**
+- Punto 1, temperatura durante il riscaldamento iniziale: `core/heatup.ts` legge dal log l'attesa bloccante (`Send:
+  M109/M190/M191` senza `Send:` né `ok` dopo; vale anche dalla `history` dopo un ricaricamento), `temperatures.heatup`
+  la tiene, `applyTargets()` in `screens/heaterTarget.ts` è l'unico punto di ingresso (NumPad, preset, spegni, tutti
+  spenti). Con `emergencyParser`: una sola richiesta con l'altro riscaldatore (`M104`/`M140`), la nuova attesa del
+  riscaldatore in attesa (`M109 S<nuovo>`, `R` se sotto la temperatura attuale, stesso `T`; la vecchia se cambia solo
+  l'altro; `M104 S0` senza attesa se lo si spegne) e `M108`. Verificato nel sorgente: OctoPrint 1.11 manda subito
+  `M108` (`serial.emergencyCommands`, `_emergency_force_send`) solo se il firmware ha riportato `EMERGENCY_PARSER`, e i
+  comandi dell'API in stampa vanno nella `_command_queue`, servita prima delle righe del job; Marlin 2.1.2.5: M108
+  "does not affect the target temperature", `M109 S` aspetta solo in salita, `R` anche in discesa. Senza la capability:
+  comportamento di prima + avviso. La Virtual Printer scalda subito e ignora M108: lo smoke test finge l'attesa nello
+  store e controlla la richiesta con `page.route`.
+- Punti 2-5, filamento: annulla (in ogni passo, anche nello spurgo) = `M410` se si muove + hot end spento con toast;
+  **Cambia** sempre disponibile (scarico → "togli il vecchio e inserisci il nuovo" → carico → spurgo → fine);
+  **deciso: M600 tolto dal wizard** (pensato per il cambio a metà stampa, chiede conferme sul display della
+  stampante), resta il pulsante durante la stampa ("Cambio (M600)"). Fine dei passi: **causa probabile trovata** nel
+  sorgente di OctoPrint: con `Cap:AUTOREPORT_POS` OctoPrint manda `M154 S5` e ogni posizione automatica diventa un
+  `PositionUpdate`, che chiudeva il passo (lo spurgo compariva subito). Ora dopo `M400` va un marcatore
+  `M118 E1 FOT-DONE <token>` (M118 c'è sempre in Marlin 2.1, la Virtual Printer lo gestisce), riconosciuto solo nelle
+  righe dal vivo (evento `fot:marker`), mai prima di metà della durata nominale. "Raffredda al termine"
+  (`filament.coolDownAtEnd`, schema impostazioni **v8**) nel dialog dell'estrusore, ora a 3 colonne (con 2 colonne
+  non ci stava più). Nello spurgo "Spurga ancora" è sotto la domanda (tre pulsanti in riga venivano tagliati).
+- Punto 6: `kernel_memory_advice` in `common.sh` (avviso se `uname -m` è `armv6*/armv7*` e MemTotal > 3 GB, con i passi
+  per `arm_64bit=1` se ci sono `kernel8.img` e i moduli `-v8`), chiamato nei controlli e ripetuto nel riepilogo;
+  nessuna modifica automatica. Testato nel deploy-test con valori finti (il container non può cambiare `uname`).
+- Punto 7: messaggio prima di apt. **Deciso: niente più domanda del display**; le righe `hdmi_*` e `video=` non
+  servono con KMS su questo schermo (verificato sul Pi nella prima parte): solo con `--display-config`,
+  `--skip-display-config` resta accettato (ora è il default), l'uninstall toglie ancora quelle delle versioni prima.
+  Paracadute per altre risoluzioni: `lib/ui/fit.ts` scala `#app` (transform, centrato; gli overlay fissi scalano con
+  lui), smoke test a 1920×1080 e 800×480. Target: nuovo `dev/e2e/targets.mjs`, **nessun elemento sotto 56 px** (anche
+  NumPad e tastiera). Animazioni: tolti i due `backdrop-filter` (uno sopra la webcam), barre di avanzamento con
+  `scaleX`. Bundle: uPlot caricato con la schermata Temperature → main **129,4 KB gzip** (era 152,9), chunk del grafico
+  23 KB.
+- Punto 8: `docs/github/release.yml` (lasciato fuori da `.github/workflows/`, quindi inattivo finché l'utente non lo
+  copia): a ogni tag `v*` controlla versioni e CHANGELOG, esegue i test e il deploy-test con gli stessi servizi Docker,
+  crea una release **bozza** con tarball e `.sha256`. Controllato con actionlint (in Docker).
+- CHANGELOG: la voce 0.10.0 raccoglie anche le correzioni della prima parte (mancavano) e la rimozione di oggetti della
+  Sessione 11, che è già nel codice di questa versione: la chiusura della 11 (v0.11.0) sarà solo formale (voce
+  CHANGELOG breve, stato), salvo verifiche sul Pi da correggere prima.
+- Test: 98 pytest, 161 vitest, svelte-check e shellcheck puliti, smoke test completo verde su Vite (3m51s),
+  deploy-test **133/133**. Trailer dei commit aggiornato a `Claude Opus 5.5` (senza "1M context").
+- Errore di processo: un comando con `perl -pe` ha interpolato `@60` del README (corretto prima del commit); niente
+  tool sul PC host, file temporanei nella cartella temporanea della sessione.
+- Da provare sul Pi (aggiunti alla Sessione finale): punti 1-5 con la stampante (M108 durante il riscaldamento,
+  annulla che spegne, cambia filamento, marcatore M118 di fine passo, raffreddamento a fine), avviso del kernel a 32 bit,
+  installazione nuova senza righe del display (risoluzione 1024×600 dal kiosk), scala dell'app se lo schermo sceglie
+  un'altra modalità, fluidità con la webcam senza blur.

@@ -6,7 +6,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-10-02
+
 ### Added
+- Temperatures: a target changed while the print waits for its heat-up (blocking `M109`/`M190`/`M191`) applies at
+  once when the firmware reports `EMERGENCY_PARSER`: the dashboard queues the new wait (`R` for a lower target) and
+  sends `M108`, which OctoPrint passes ahead of its queue; the other heater is set and the current wait restarted.
+  Without the capability a message says the new target applies when the heat-up ends.
+- Filament: **Change** next to Load and Unload, always available: heat, unload, "swap the filament", load, purge
+  (with M701/M702 when enabled, otherwise the G-code sequences). M600 is no longer part of the wizard; it stays
+  as the filament change offered during a print.
+- Filament → Extruder setup: "Cool down at the end" (default off) turns the hotend off when a load, unload or change
+  is done (settings schema v8).
 - Cancel single objects during a print: an "Objects n/m" button on Home opens a bed map (printer profile size,
   the objects' outlines, current object highlighted, cancelled ones struck through) and a list; each cancel asks
   for confirmation, and the last object left cannot be cancelled. It uses Marlin `M486` when the firmware has
@@ -19,15 +30,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Manager API; OctoPrint is restarted only when it is not printing; `--no-cancel-plugin`. A key without admin
   rights or no network only warns with the manual steps. `uninstall.sh` offers to remove the plugin only when
   the installer added it.
-- Dev: the Cancel Objects plugin in the OctoPrint container, four-object samples (PrusaSlicer comments and
-  `M486`), smoke test and installer test steps for both paths.
+- Installer: a warning (repeated in the summary) when a 32-bit kernel runs on a Pi with more than 3 GB of RAM, as
+  OctoPi does on a Pi 4 with 8 GB, with the steps for `arm_64bit=1`; nothing is changed automatically. A line before
+  apt says that downloading Chromium takes minutes without a progress bar.
+- System → Settings → Screen: the screen resolution (1024×600 recommended, the modes the screen announces, or its
+  default). It is applied at once and goes back by itself after 15 s unless confirmed; the agent keeps it and sets
+  it again when the screen comes back on.
+- The app keeps its 1024×600 layout on screens of other sizes, scaled to fit and centred.
+- Dev: `dev/e2e/targets.mjs` lists the touch targets under 56 px on every screen; `docs/github/release.yml` is a
+  suggested GitHub Action (inactive until copied to `.github/workflows/`) that tests and builds a draft release at
+  each tag; the Cancel Objects plugin in the OctoPrint container, four-object samples (PrusaSlicer comments and
+  `M486`), smoke test and installer test steps (133 checks).
+
+### Changed
+- Installer: no more display question. On the real Pi the manufacturer's `hdmi_*` lines and `video=` turned out to
+  have no effect with KMS (the screen does not list 1024×600 in its EDID); the kiosk sets the mode with `wlr-randr`.
+  The old lines are added only with `--display-config`; `--skip-display-config` is the default and still accepted;
+  uninstalling still removes lines added by earlier versions.
+- Filament wizard: the end of each step is an `M118` marker echoed after `M400`, no longer the next position report.
+- Performance on the Pi: the temperature chart (uPlot) is loaded with its screen (main bundle 129 KB gzip instead of
+  153 KB), no `backdrop-filter` blur (over the webcam it was redrawn at every frame), progress bars animate a
+  transform instead of their width.
 
 ### Fixed
+- Filament: cancelling the wizard (at any step, also while heating) now turns the hotend off instead of leaving it
+  heating.
+- Filament: the purge step could show up while the load was still running: with `AUTOREPORT_POS` OctoPrint turns on
+  `M154` and each automatic position report ended the step.
 - Kiosk: when Chromium's page crashes (seen on the Pi: its renderer killed by the kernel's OOM killer) the agent
   notices that the page's event stream is gone and restarts the kiosk after 60 s (`kiosk_watchdog_s`), instead of
   leaving the "Something went wrong" page on screen.
 - Webcam: a stream that ended (streamer restarted) or went silent froze on its last frame forever. The agent now
   cuts such streams (10 s without data) and the preview reconnects by itself.
+- Kiosk on the 7" screen: the app filled only part of the screen (cage picked 1920×1080 from the EDID): the kiosk
+  sets 1024×600 with `wlr-randr --custom-mode`. Cage's own arrow in the middle of the screen is hidden with an
+  invisible cursor theme.
+- Screen off: the screen stayed dark after a touch (cage refuses `--on` together with a mode, and `--on` alone
+  picked the first mode): the agent switches the output on, then sets the mode.
+- Installer on OctoPi 1.1.0: a numeric `User=` and `${PORT}`-style options in `octoprint.service` are resolved.
 - Smoke test: the move step no longer depends on a Virtual Printer race that sometimes ran a jog as an absolute
   move.
 

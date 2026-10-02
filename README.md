@@ -34,11 +34,13 @@ Available now:
 - Screensaver with a large progress/clock view (optionally with the file thumbnail) and optional HDMI power-off
   when idle (never while printing); the touch that wakes the screen never presses a button.
 - Temperatures: NumPad targets, per-heater and global off, a live chart (5/15/30 min) and preheat presets you
-  can add, edit, reorder and reset.
+  can add, edit, reorder and reset. A target changed while the print waits for its heat-up (`M109`/`M190`)
+  applies at once when the firmware has `EMERGENCY_PARSER` (the wait is ended with `M108` and restarted).
 - Movement: X/Y/Z jog with 0.1/1/10/50 mm steps kept inside the printer profile's build volume, homing, motors
   off, head position, jog speeds.
-- Filament: load/unload wizard (heat, insert, load, purge) using M701/M702 or configurable G-code sequences for
-  direct or bowden extruders, M600 filament change, manual extrude/retract with cold extrusion protection.
+- Filament: load, unload and change wizard (heat, unload, swap, load, purge) using M701/M702 or configurable
+  G-code sequences for direct or bowden extruders; cancelling turns the hotend off, an option turns it off at the
+  end too. Firmware filament change (M600) during a print, manual extrude/retract with cold extrusion protection.
 - Terminal: live serial log with filters (temperatures, `ok`, busy, SD status, position), pause and auto-scroll,
   commands typed on an in-app G-code keyboard, history and quick commands; macros as big buttons you can add,
   edit, reorder and reset, with optional confirmation.
@@ -61,10 +63,10 @@ Available now:
   `OctoPrint comments` (`Firmware-specific` once the firmware has `M486`). Files uploaded before the plugin was
   installed must be uploaded again: the plugin prepares each file when it is uploaded.
 - English and Italian, fully offline (no CDN, works without Wi-Fi).
+- Laid out for the 1024×600 panel; on a screen of another size the whole app is scaled to fit.
+- One-command installer for OctoPi (kiosk, services, USB automount), see below.
 
-Planned:
-
-- Installer for OctoPi (kiosk, services, USB automount), then a test on the real hardware.
+Planned: the complete test on the real hardware (version 1.0.0).
 
 ## How it works
 
@@ -180,8 +182,9 @@ All commands are run from the repository root.
 | `docker compose -f dev/docker-compose.yml run --rm agent-test` | agent: ruff lint + format check + pytest |
 | `docker compose -f dev/docker-compose.yml run --rm frontend-test` | frontend: svelte-check + tsc + vitest |
 | `docker compose -f dev/docker-compose.yml run --rm build` | production build of the frontend into `frontend/dist` |
-| `docker compose -f dev/docker-compose.yml run --rm playwright` | smoke test (data layer, every screen, NumPad and confirmations, host prompt, printer overlay, Files (folders, sort, search, detail, delete, SD card, USB import/eject), Temperature (targets, presets CRUD), Move (jog limits), Filament (setup, load/unload wizard, manual extrusion), Terminal (keyboard, filters, pause, history), macros CRUD, Leveling (paper test, mesh heatmap, manual mesh, babystep, probe offset), System (metrics, system commands, custom actions and status bar, every settings section, API key, reset, PSU Control), a real print from the Home with fan/speed sliders, pause/resume, webcam and the end-of-print notice, screensaver and screen off, kiosk mode, language) + 1024×600 screenshots into `dev/screenshots/`; `-e ONLY=terminal,leveling` runs only those steps |
+| `docker compose -f dev/docker-compose.yml run --rm playwright` | smoke test (data layer, every screen, NumPad and confirmations, host prompt, printer overlay, Files (folders, sort, search, detail, delete, SD card, USB import/eject), Temperature (targets, presets CRUD), Move (jog limits), Temperature during a heat-up (M108), Filament (setup, load/unload/change wizard, cancel, cool down at the end, manual extrusion), Terminal (keyboard, filters, pause, history), macros CRUD, Leveling (paper test, mesh heatmap, manual mesh, babystep, probe offset), System (metrics, system commands, custom actions and status bar, every settings section, API key, reset, PSU Control), a real print from the Home with fan/speed sliders, pause/resume, webcam and the end-of-print notice, screensaver and screen off, kiosk mode, scaling on other screen sizes, language) + 1024×600 screenshots into `dev/screenshots/`; `-e ONLY=terminal,leveling` runs only those steps |
 | `docker compose -f dev/docker-compose.yml run --rm playwright sh -c "npm install && node accents.mjs"` | screenshots of Home, NumPad and gallery for each accent colour |
+| `docker compose -f dev/docker-compose.yml run --rm playwright sh -c "npm install && node targets.mjs"` | lists the touch targets under 56 px on every screen (`MIN_TARGET=` to change the size) |
 | `docker compose -f dev/docker-compose.yml run --rm shellcheck` | lint every shell script |
 | `docker compose -f dev/docker-compose.yml run --rm release` | build `release/floppyoctotouch-<version>.tar.gz` + `.sha256` (web app, agent wheel, `deploy/`); older tarballs are deleted |
 | `docker compose -f dev/docker-compose.yml run --rm deploy-test` | installer test in Debian bookworm: install, checks, agent + kiosk launcher, USB helper, reinstall, update, uninstall, install from a clone, sudo self-elevation, interactive questions on a fake terminal |
@@ -190,6 +193,9 @@ Sample G-code files with PrusaSlicer (PNG, QOI) and OrcaSlicer thumbnails live i
 generated by `dev/tools/make_sample_gcode.py`; `3dbenchy_prusaslicer.gcode` is a real PrusaSlicer 2.9 export for
 the Tatara A8 profile (240 layers, about 45 min, 300×300 PNG thumbnail), handy for long jobs and real file info.
 `dev/fake-usb/` is mounted into the agent as a fake USB stick.
+
+`docs/github/release.yml` is a ready GitHub Action, not active yet: copied to `.github/workflows/`, it tests and
+builds the release at every `v*` tag and attaches the tarball to a draft GitHub release.
 
 ## Installation on the Raspberry Pi
 

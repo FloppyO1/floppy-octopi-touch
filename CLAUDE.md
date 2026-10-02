@@ -24,7 +24,7 @@ then **stop** — never start the next session.
   ```
   feat(agent): add reverse proxy for /api and /sockjs
 
-  Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+  Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
   ```
   (update the trailer if the model changes). Remote `github` = `https://github.com/FloppyO1/floppy-octopi-touch`,
   managed by the user: Claude commits and tags locally and **never pushes**.
@@ -82,7 +82,8 @@ frontend/src/lib/core/         pure logic + tests: capabilities (M115), hostActi
                                mesh (LevelingParser: M420 V / G29 reports, stats, colour scale), leveling (paper
                                test points, G-code, G28/M84 detection), system (usage/heat tones, network
                                summary, system command order, HTML confirm → text), power (PSU state, custom
-                               actions: validation, sanitising), objects (cancel method, object list, bed geometry)
+                               actions: validation, sanitising), objects (cancel method, object list, bed geometry),
+                               heatup (blocking M109/M190 waits from the log, M108 override commands)
 frontend/src/lib/stores/       *.svelte.ts singletons (connection, printer/job, temperatures, files, usb, terminal,
                                events, capabilities, prompt, server, settings, nav, clock, tune, notices, idle,
                                leveling, system (polled only while watched), power (PSU Control), objects (cancel objects))
@@ -90,7 +91,7 @@ frontend/src/lib/stores/       *.svelte.ts singletons (connection, printer/job, 
 frontend/src/lib/i18n/         en.json, it.json, index.svelte.ts (t(), setLocale())
 frontend/src/lib/ui/           design system: tokens.css, components (Button, Card, Modal, NumPad, OnScreenKeyboard, Thumb,
                                RingGauge, SliderDialog, Segmented, WebcamView, …), dialogs.svelte.ts / toast.svelte.ts services,
-                               press.ts, theme.ts, kiosk.ts
+                               press.ts, theme.ts, kiosk.ts, fit.ts (scales the app on screens other than 1024×600)
 frontend/src/shell/            Shell, Sidebar, StatusBar, ConnectionOverlay, PrinterOverlay, Screensaver, NoticeDialog,
                                screens.ts (registry)
 frontend/src/screens/          Home + home/ (JobView, IdleView, Preview, StatusRows, ObjectsDialog, actions.ts), Files + files/
@@ -108,7 +109,7 @@ frontend/preview.html          1024×600 frame around the app (also in the produ
 dev/docker-compose.yml         dev stack + tool services; dev/docker/*.Dockerfile
 dev/octoprint/                 seed config.yaml + init.sh for the OctoPrint volume
 dev/e2e/screenshot.mjs         Playwright smoke test/screenshots (own package.json, Playwright 1.63.0);
-                               accents.mjs = screenshots of every accent variant
+                               accents.mjs = screenshots of every accent variant, targets.mjs = touch targets < 56 px
 dev/sample-gcode/              samples with PrusaSlicer PNG/QOI and OrcaSlicer thumbnails (dev/tools/make_sample_gcode.py)
                                + 3dbenchy_prusaslicer.gcode (real export, Tatara A8 profile, 300x300 PNG, ~45 min)
                                + four-objects_prusaslicer.gcode / four-objects-m486_prusaslicer.gcode (cancel objects)
@@ -117,6 +118,7 @@ dev/fake-webcam/server.py      MJPEG test pattern (ffmpeg testsrc) on :8080, ser
 deploy/                        install.sh, update.sh, uninstall.sh, lib/common.sh, systemd/*.service.in, pam/, udev/,
                                sudoers/, kiosk/ (kiosk.sh + kiosk.env), usb/usb-mount.sh (udev + systemd-mount)
 scripts/build-release.sh       release tarball (service `release`) -> release/ (only the latest, committed)
+docs/github/release.yml        suggested GitHub Action (inactive until copied to .github/workflows/): draft release at a tag
 dev/deploy-test/               installer test on Debian bookworm (run.sh, fake_octoprint.py, drive.py = answers the
                                questions on a fake terminal; service `deploy-test`)
 ```
@@ -189,8 +191,21 @@ dev/deploy-test/               installer test on Debian bookworm (run.sh, fake_o
   jog into an absolute move, whatever the pause between jogs. It also answers `M114` immediately (hence `M400`
   before every `M114` in the app). Real Marlin is sequential. In Playwright, only jog from 0 or set a known position
   with `G92` + `read-position` first (see the move step).
-- OctoPrint fires `PositionUpdate` (x, y, z, e, t, f, reason) for every M114 answer: the filament wizard uses
-  `M400` + `M114` to know when its moves are done.
+- OctoPrint fires `PositionUpdate` (x, y, z, e, t, f, reason) for every position report, also the automatic ones:
+  with `Cap:AUTOREPORT_POS` it sends `M154 S5` itself. So the filament wizard ends its steps on an echoed marker
+  after `M400` (`M118 E1 FOT-DONE <token>` → `Recv: echo:FOT-DONE <token>`, event `fot:marker`), never on the
+  next `PositionUpdate`. M118 is always built into Marlin 2.1; the Virtual Printer answers it too.
+- Heat-up waits: OctoPrint force-sends `M108` (in `serial.emergencyCommands`) ahead of the line waiting for `ok` only
+  when the firmware reported `Cap:EMERGENCY_PARSER:1`; API commands sent while printing go before the job's next
+  lines. The Virtual Printer heats at once and ignores M108: the smoke test fakes the wait with
+  `window.__fot.temperatures.ingestLog(['Send: N7 M109 S200*1'])` and checks the request with `page.route`.
+- The display lines in `config.txt` (`hdmi_*`) and `video=` in `cmdline.txt` do nothing with KMS on the 7" screen
+  (1024×600 is not in its EDID): the installer adds them only with `--display-config`; the mode comes from
+  `wlr-randr` (kiosk.sh / agent, System → Settings → Screen).
+- Dialogs survive a hash-only navigation: a Playwright script that visits several screens should go through
+  `about:blank` (see `dev/e2e/targets.mjs`).
+- In the Bash tool, `perl -pe` replacements interpolate `@60`-like text as arrays and `$1`-like text: check the diff,
+  or use the Edit tool for anything with `@`/`$`.
 - A Card's `{#snippet actions()}` shadows a script variable called `actions` inside the Card: name it otherwise.
 - `Wizard.svelte` and a `wizard.svelte.ts` in the same folder clash (case-insensitive file names): that is why
   the wizard state lives in `filament/flow.svelte.ts`.
@@ -234,17 +249,16 @@ dev/deploy-test/               installer test on Debian bookworm (run.sh, fake_o
 
 ## Current state
 
-v0.9.1 (session 9b): one-command install on the Pi (`git clone` + `./deploy/install.sh`): the scripts re-exec
-themselves through sudo, every question comes first (API key pasted by hand, asked again until OctoPrint accepts it;
-display; reboot), then it runs unattended and reboots after a cancellable 10 s countdown. v0.9.0 (session 9): the
-installer itself (idempotent; from a clone it installs the tarball in `release/`), agent + kiosk systemd units (cage +
-Chromium on tty1 via a PAM/logind session), read-only USB automount (udev + `systemd-mount` on `/media/usb-<label>`),
-sudo rule for eject/kiosk restart, optional display lines in `config.txt`/`cmdline.txt`,
-`floppyoctotouch-update`/`-uninstall`, release build and a bookworm installer test (100 checks), now installed and
-running on a real Pi. Before: every screen (sessions 3-8). Session 10 (fixes from the Pi and polish, v0.10.0) in
-progress on `main`: kiosk watchdog and webcam recovery done; next the filament/temperature fixes listed in the plan.
-Session 11 (cancel objects, merged into `main` on 2026-09-27: agent `/local/objects`, Home "Objects" dialog, M486 or the Cancel Objects plugin,
-installer question; installer test 127 checks): code and docs done, closes as v0.11.0 after session 10. All the
-tests on the Pi (hardware checklist, cancel objects with the printer, the fixes) are in the final session (v1.0.0).
+v0.10.0 (session 10, fixes from the Pi and polish): a heater target changed during a blocking heat-up applies at
+once with EMERGENCY_PARSER (new wait + M108), filament wizard with Change (unload + load), cancel turning the hotend
+off, "cool down at the end" (settings v8) and an `M118` end marker; installer without the display question (lines
+only with `--display-config`), 32-bit kernel warning, message before apt; the app scales on other screen sizes;
+uPlot lazy-loaded (main bundle 129 KB gzip); kiosk watchdog, webcam recovery, resolution setting and the OctoPi 1.1.0
+fixes. v0.9.x: one-command installer (sudo re-exec, questions first, agent + kiosk units with cage + Chromium on
+tty1, read-only USB automount, update/uninstall, bookworm installer test, now 133 checks), running on a real Pi.
+Before: every screen (sessions 3-8). Session 11 (cancel objects: agent `/local/objects`, Home "Objects" dialog,
+M486 or the Cancel Objects plugin, installer question) is merged into `main` and already shipped in 0.10.0; only its
+closure (v0.11.0) is left. All the tests on the Pi (hardware checklist, cancel objects with the printer, the session
+10 fixes) are in the final session (v1.0.0).
 Repository: `https://github.com/FloppyO1/floppy-octopi-touch` (README clone commands, About screen).
 See `docs/PLAN.md` for details and notes between sessions.

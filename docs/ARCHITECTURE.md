@@ -87,10 +87,10 @@ icons are bundled.
 | Folder | Content |
 |---|---|
 | `src/lib/api/` | transport: `http.ts` (JSON helpers, path encoding), `octoprint.ts` (typed REST client), `agent.ts` (`/local/*`), `socket.ts` (push API), `types.ts` (OctoPrint 1.11 types) |
-| `src/lib/core/` | pure, unit-tested logic: M115 capabilities, host action parser, temperature ring buffer, file tree helpers (recent files, thumbnails, sort, search, breadcrumbs), printer phase/tone and plugin detection, settings schema/migrations, formatting, gauge geometry, NumPad entry, keyboard layouts, overrides from the log (`tune`), DisplayLayerProgress layers (`layer`), webcam source (`webcam`), idle levels (`idle`), print notices (`notices`), presets validation (`presets`), generic list operations (`lists`), jog limits (`move`), filament sequences (`filament`), chart colours (`chart`), terminal filters and history (`terminal`), macros (`macros`), mesh parser and stats (`mesh`), paper test points and leveling G-code (`leveling`), cancel objects: mechanism, object list, bed geometry (`objects`) |
+| `src/lib/core/` | pure, unit-tested logic: M115 capabilities, host action parser, temperature ring buffer, file tree helpers (recent files, thumbnails, sort, search, breadcrumbs), printer phase/tone and plugin detection, settings schema/migrations, formatting, gauge geometry, NumPad entry, keyboard layouts, overrides from the log (`tune`), DisplayLayerProgress layers (`layer`), webcam source (`webcam`), idle levels (`idle`), print notices (`notices`), presets validation (`presets`), generic list operations (`lists`), jog limits (`move`), filament sequences and wizard steps (`filament`), blocking heat-up waits (`heatup`), chart colours (`chart`), terminal filters and history (`terminal`), macros (`macros`), mesh parser and stats (`mesh`), paper test points and leveling G-code (`leveling`), cancel objects: mechanism, object list, bed geometry (`objects`) |
 | `src/lib/stores/` | Svelte 5 stores (classes with `$state`/`$derived`, one singleton each) and `dataLayer.ts`, which wires the socket to them |
 | `src/lib/i18n/` | `en.json`, `it.json`, `t()`, `setLocale()` (default English) |
-| `src/lib/ui/` | design system: tokens, components, `dialogs`/`toast` services, `pressable` attachment, theme (accent) and kiosk helpers |
+| `src/lib/ui/` | design system: tokens, components, `dialogs`/`toast` services, `pressable` attachment, theme (accent), kiosk helpers and `fit.ts` (scaling for other screen sizes) |
 | `src/shell/` | app shell: sidebar, status bar, screen registry, connection and printer overlays, screensaver, print notice dialog |
 | `src/screens/` | screens (`Home` with its parts in `home/`, `Files` in `files/`, `Temperature` in `temperature/`, `Move` in `move/`, `Filament` in `filament/`, `Terminal` in `terminal/`, `Leveling` in `leveling/`, temporary `System`), shared `heaterTarget.ts`, dev-only pages in `dev/` (`Gallery`, `Debug`) |
 
@@ -120,6 +120,13 @@ the client never uses them and always builds relative paths.
   screens while the serial connection is down and offers port/baud selection and Connect.
 - **Kiosk hardening** (`src/lib/ui/kiosk.ts`, `?kiosk=1`): hidden cursor, and prevented context menu, drag,
   text selection, pinch/ctrl+wheel/keyboard zoom.
+- **Other screen sizes** (`src/lib/ui/fit.ts`, applied to `#app` in `main.ts`): the layout is fixed at 1024×600;
+  in a window of another size `#app` gets a `transform: scale()` (the smaller of the two ratios) and is centred,
+  with bars on the free sides. The fixed overlays (dialogs, screensaver, toasts) are inside `#app`, whose
+  transform makes it their containing block, so they scale with it; Chromium's hit testing follows the transform.
+- **Performance on the Pi**: no `backdrop-filter` (over the webcam it would be recomposited at every frame),
+  progress bars animate `transform: scaleX()` (no layout), the uPlot chart is a separate chunk loaded with the
+  Temperature screen. `dev/e2e/targets.mjs` lists the interactive elements under 56 px on every screen.
 - **Dev pages**: `/ui-gallery` and `/debug` are loaded with dynamic imports guarded by `import.meta.env.DEV`,
   so they are not part of the production build.
 
@@ -205,7 +212,7 @@ the client never uses them and always builds relative paths.
 
 - **Temperature** (`src/screens/Temperature.svelte`, parts in `temperature/`): `HeaterCard` per heater (gauge and
   Set → `askHeaterTarget()`, Off → `heaterOff()`), All heaters off (`allHeatersOff()`; both confirm while a job
-  runs), `TempChart` and the presets row (preheat disabled during a job). `TempChart` builds one uPlot instance
+  runs), `TempChart` (dynamic import: uPlot is not in the main bundle) and the presets row (preheat disabled during a job). `TempChart` builds one uPlot instance
   per heater set (actual + dashed target series, colours from the state tokens via `core/chart.ts`) and calls
   `setData()` on every `temperatures.revision`; the x range is always `[last - window, last]`, the y range starts
   at 0. The window (`temperature.chartMinutes`) is a setting. `PresetManager`/`PresetEditor` use the pure helpers
@@ -218,15 +225,33 @@ the client never uses them and always builds relative paths.
   optimistically before the request (so quick taps are limited correctly) and schedules one `M400` + `M114`
   600 ms after the last jog; `reportPosition()` drops M114 answers older than the last jog. Homing asks for the
   position after `G28`, `M84` makes it unknown. Everything but the fan is disabled while `printer.busy`.
+- **Heater targets during a heat-up** (`core/heatup.ts`, `temperatures.heatup`): while Marlin waits in a blocking
+  `M109`/`M190`/`M191` it reads nothing else, so a target sent from the screen would only arrive at the end of the
+  wait. The wait is read from the log (a `Send: M109 …` with no later `Send:` or `ok`: OctoPrint sends one line at a
+  time, also from `history` after a reload). Every target change goes through `applyTargets()` in
+  `screens/heaterTarget.ts`. With the `emergencyParser` capability it sends, in one request, the other heaters'
+  `M104`/`M140`, the waiting heater's new wait (`M109 S<new>`, `R` below the current temperature, the same `T`; its old
+  target again if only another heater changed; `M104 S0` without a wait when turned off) and `M108`. OctoPrint
+  queues the API commands ahead of the job's next lines and force-sends `M108` (in `serial.emergencyCommands`) at
+  once when the firmware reported `EMERGENCY_PARSER`. Marlin's M108 ends the wait without touching the target, so
+  the printer heads for the new value and the job goes on when it is reached. Without the capability a toast says
+  the target applies when the wait ends.
 - **Filament** (`src/screens/Filament.svelte`, parts in `filament/`): `flow.svelte.ts` is the wizard state machine
-  (`material → heat → [insert] → run → [purge] → done`), a singleton so a running step survives navigation. The
-  heat step sets the preset's hotend target and advances once `reachedTarget()`; each run sends
-  `actionGcode()` (`core/filament.ts`: `M701`/`M702` with the `filamentLoadUnload` capability, `M600` for a
-  change, otherwise `M83`, `G1 E… F…` pieces of ≤ 100 mm, `M82`) followed by `M400` + `M114`, and waits for the
-  next `PositionUpdate` (timeout: nominal duration + 30 s, 5 min for firmware commands, none for M600). The
-  progress bar is a CSS animation over the nominal duration. `canExtrude()` blocks extrusion below
-  `filament.minTemp`. `FilamentSetup` edits `filament.*` and sets `configured`; until then the wizard warns once
-  per session. During a job the screen is locked and, with the `advancedPause` capability, offers `M600`.
+  (`material → heat → [unload] → [insert] → [load] → [purge] → done`; a change is an unload, "swap the filament",
+  then a load), a singleton so a running step survives navigation. The progress row shows the running step by
+  what it does (`progressStep()`). The heat step sets the preset's hotend target and advances once
+  `reachedTarget()`; each run sends `actionGcode()` (`core/filament.ts`: `M701`/`M702` with the
+  `filamentLoadUnload` capability, otherwise `M83`, `G1 E… F…` pieces of ≤ 100 mm, `M82`) followed by `M400` and an
+  end marker, `M118 E1 FOT-DONE <token>` (token unique per page and run). The data layer turns the echoed
+  `Recv: echo:FOT-DONE <token>` (live lines only) into a `fot:marker` event that ends the step. A `PositionUpdate`
+  was used before, but with `AUTOREPORT_POS` OctoPrint turns on `M154` and Marlin reports the position every few
+  seconds, which ended the step early. A marker before half the nominal duration is held until then; timeout:
+  nominal duration + 30 s, 5 min for firmware commands. The progress bar is a CSS animation over the nominal
+  duration. Cancel (any step) stops the moves (`M410`) and turns the hotend off; `filament.coolDownAtEnd` turns it
+  off at the end. `canExtrude()` blocks extrusion below `filament.minTemp`. `FilamentSetup` edits `filament.*` and
+  sets `configured`; until then the wizard warns once per session. During a job the screen is locked and, with the
+  `advancedPause` capability, offers the firmware's `M600` (no longer part of the wizard: it is meant for a change
+  in the middle of a print and asks for confirmations on the printer's own display).
 
 ### Terminal and macros
 
@@ -361,14 +386,14 @@ All questions come first, before apt and pip; after "No more questions" it runs 
 |---|---|
 | root | not root → `exec sudo -- bash <script> <args>` (`sudo -n` with `--non-interactive`; `ensure_root` in `common.sh`, also used by update/uninstall), so `./deploy/install.sh` and `bash deploy/install.sh` (executable bit lost) both work |
 | payload | release layout (`VERSION`, `frontend/index.html`, wheel) or a checkout with `frontend/dist`; a plain clone runs the bundled `release/*.tar.gz` instead (checksum, extracted to a temp dir, same options) |
-| checks | bookworm, arm64/armhf (other architectures only warn: test containers), `octoprint.service` read with `systemctl cat` or from the unit files: `User=` (taken without asking; asked only when there is no unit), `--port`, `--basedir` (→ `uploads_dir`); OctoPrint's `/api/version` polled for up to 10 s |
-| questions | API key first (instructions with the Pi's real address; hidden input, whitespace stripped, format `[A-Za-z0-9_-]{16,128}`, checked on `/api/version`: 200 accepted, 401/403 asked again without limit, no answer → saved unchecked, empty → entered later on the touch screen); a saved key that OctoPrint still accepts is kept without asking; `--listen-lan` confirmation; Cancel Objects plugin (only on a new install, when it is missing and a key is known; default yes; `--no-cancel-plugin` skips it, `--non-interactive` installs it); display settings (default yes); reboot at the end (default yes only when the display settings are added) |
-| packages | `cage`, `chromium` or `chromium-browser` (whichever is installed or has an apt candidate), `python3-venv`, `wlr-randr`, `fonts-dejavu-core`, `curl`; `apt-get update` only when something is missing |
+| checks | bookworm, arm64/armhf (other architectures only warn: test containers), a warning (repeated in the summary) for a 32-bit kernel (`uname -m` `armv6*`/`armv7*`) with more than 3 GB of RAM, with the `arm_64bit=1` steps when `kernel8.img` and `-v8` modules are there (`kernel_memory_advice` in `common.sh`; never changed automatically), `octoprint.service` read with `systemctl cat` or from the unit files: `User=` (taken without asking; asked only when there is no unit), `--port`, `--basedir` (→ `uploads_dir`); OctoPrint's `/api/version` polled for up to 10 s |
+| questions | API key first (instructions with the Pi's real address; hidden input, whitespace stripped, format `[A-Za-z0-9_-]{16,128}`, checked on `/api/version`: 200 accepted, 401/403 asked again without limit, no answer → saved unchecked, empty → entered later on the touch screen); a saved key that OctoPrint still accepts is kept without asking; `--listen-lan` confirmation; Cancel Objects plugin (only on a new install, when it is missing and a key is known; default yes; `--no-cancel-plugin` skips it, `--non-interactive` installs it); reboot at the end (default yes only with `--display-config`) |
+| packages | `cage`, `chromium` or `chromium-browser` (whichever is installed or has an apt candidate), `python3-venv`, `wlr-randr`, `fonts-dejavu-core`, `curl`; `apt-get update` only when something is missing; a line before apt says the download (Chromium > 100 MB) takes minutes without a progress bar |
 | files | `/opt/floppyoctotouch/{frontend,agent,deploy,VERSION}` replaced as new directories (running scripts keep their copy), root-owned; venv in `/opt/floppyoctotouch/venv` (recreated when the system Python changes), agent force-reinstalled from the wheel; `/usr/local/bin/floppyoctotouch-{update,uninstall}` |
 | config | `~/.config/floppyoctotouch/config.json` (dir 700, file 600, owned by the user): only the managed keys are replaced (`octoprint_url`, `host`, `static_dir`, `uploads_dir`, `usb_roots` = `/media/usb-*`, `usb_eject_command`, `kiosk_restart_command`, `display_backend` = `wlr-randr`, `display_output` from the connected `/sys/class/drm/card*-HDMI-A-*`), `api_key` only when a new one was given and accepted by `/api/version` |
 | system files | units rendered from `deploy/systemd/*.in` (`@USER@`, `@UID@`, `@HOME@`, `@PREFIX@`, …), PAM file, `/etc/floppyoctotouch/kiosk.env` (kept once created), sudoers checked with `visudo -c`, udev rule, groups `video`/`render`/`input`; units enabled, `getty@tty1` disabled |
 | plugin | Cancel Objects 0.6.4 (pinned) through `POST /api/plugin/pluginmanager {"command": "install", "url": …}` like OctoPrint's own button; the version is followed in OctoPrint's Python (`importlib.metadata`, up to 5 min), then OctoPrint is restarted unless `/api/job` reports a print (then a warning). 401/403 (key of a non-admin user) or any other error only warns with the manual steps |
-| display | block between `# >>> FloppyOctoTouch display >>>` markers appended to `config.txt` (`hdmi_group=2`, `hdmi_mode=87`, `hdmi_cvt 1024 600 60 6 0 0 0`, …) and `video=<output>:1024x600@60` appended to `cmdline.txt`, each with a timestamped backup, only when missing |
+| display | only with `--display-config` (no question: with KMS the lines do not give the 1024×600 mode, which the screen does not list in its EDID, so `kiosk.sh` sets it with `wlr-randr`): block between `# >>> FloppyOctoTouch display >>>` markers appended to `config.txt` (`hdmi_group=2`, `hdmi_mode=87`, `hdmi_cvt 1024 600 60 6 0 0 0`, …) and `video=<output>:1024x600@60` appended to `cmdline.txt`, each with a timestamped backup, only when missing |
 | state | `/etc/floppyoctotouch/install.conf`: version, user, LAN flag, the `cmdline.txt` token actually added, whether it installed the Cancel Objects plugin, OctoPrint URL and Python |
 | start | without systemd as PID 1 (containers) units are only enabled; otherwise agent restarted, `/local/health` polled for 20 s; then, if a reboot was asked for, a 10 s countdown (Ctrl+C cancels it, trapped `SIGINT`) and `systemctl reboot`, else the kiosk is restarted |
 
@@ -384,8 +409,8 @@ Runtime on the Pi:
 | `/etc/sudoers.d/floppyoctotouch` | the user may run, without password, only `systemctl restart floppyoctotouch-kiosk.service` and `usb-mount.sh eject /media/usb-*` |
 
 `deploy/update.sh` verifies the `.sha256`, extracts the tarball, compares versions (`sort -V`; same or older
-version only with a confirmation or `--force`) and runs the new `install.sh --update --user=<saved>` (no key or
-display questions, `kiosk.env`, `config.json` and `settings.json` kept). `deploy/uninstall.sh` stops and removes
+version only with a confirmation or `--force`) and runs the new `install.sh --update --user=<saved>` (no key
+question, boot files untouched, `kiosk.env`, `config.json` and `settings.json` kept). `deploy/uninstall.sh` stops and removes
 the units, re-enables `getty@tty1`, removes udev/sudoers/PAM files, the display block and the recorded
 `cmdline.txt` token (with backups), the Cancel Objects plugin (only when the installer added it, after a question, default no, through the Plugin Manager), `/opt/floppyoctotouch` and `/etc/floppyoctotouch`; the configuration only
 with `--purge` or a yes.
@@ -393,7 +418,7 @@ with `--purge` or a yes.
 `dev/deploy-test/run.sh` (service `deploy-test`, `debian:bookworm` with `cage` and `chromium` preinstalled, no
 systemd as PID 1) fakes an OctoPi (`pi` user, `octoprint.service`, boot files, a stand-in OctoPrint answering
 `/api/version`, `/api/job` and a Plugin Manager that only accepts the admin key) and checks install, config, units (`systemd-analyze verify`), sudo rules, groups, boot files,
-the agent running with the installed config, the kiosk launcher with a fake Chromium, the USB helper with a fake
+the agent running with the installed config, the 32-bit kernel warning (`kernel_memory_advice` with fake `uname -m`, MemTotal, boot and modules folders), the kiosk launcher with a fake Chromium, the USB helper with a fake
 `systemd-mount`, a second run (idempotence), update, uninstall, the install from a clone, self-elevation of
 install/update/uninstall from `pi` (passwordless sudo like OctoPi, installer without its executable bit) and
 interactive runs on a fake terminal: `dev/deploy-test/drive.py` answers each question in order (regex + reply),
@@ -416,3 +441,8 @@ without admin rights, OctoPrint printing, `--no-cancel-plugin`, uninstall keepin
 | `release`, `deploy-test` | `dev/docker/release.Dockerfile`, `dev/docker/deploy-test.Dockerfile` (profile `tools`) | release tarball into `release/`; installer test on bookworm with `release/` and `dev/deploy-test` mounted read-only |
 
 All published ports bind to `127.0.0.1`.
+
+`docs/github/release.yml` is a suggested GitHub Action (inactive until copied to `.github/workflows/`): at a `v*`
+tag it checks that the tag matches both versions and has a CHANGELOG entry, runs the same Docker services
+(agent/frontend tests, shellcheck, `release` with `SOURCE_DATE_EPOCH` = commit time, `deploy-test`) and creates a
+**draft** GitHub release with the tarball, its `.sha256` and the CHANGELOG entry as notes.
