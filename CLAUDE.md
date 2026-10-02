@@ -119,6 +119,7 @@ dev/e2e/screenshot.mjs         Playwright smoke test/screenshots (own package.js
 dev/sample-gcode/              samples with PrusaSlicer PNG/QOI and OrcaSlicer thumbnails (dev/tools/make_sample_gcode.py)
                                + 3dbenchy_prusaslicer.gcode (real export, Tatara A8 profile, 300x300 PNG, ~45 min)
                                + four-objects_prusaslicer.gcode / four-objects-m486_prusaslicer.gcode (cancel objects)
+                               + bunny-benchy_prusaslicer.gcode (3 labelled objects, 480x360 PNG: README screenshots)
 dev/fake-usb/                  mounted read-only in the agent as /media/usb0, writable in playwright (/fake-usb)
 dev/fake-webcam/server.py      MJPEG test pattern (ffmpeg testsrc) on :8080, service `webcam`
 deploy/                        install.sh, update.sh, uninstall.sh, lib/common.sh, systemd/*.service.in, pam/, udev/,
