@@ -1,5 +1,5 @@
 <script lang="ts">
-  // Guided load/unload/change: one card whose body follows the wizard step.
+  // Guided load/unload/change (unload + load): one card whose body follows the wizard step.
   import CircleCheck from '@lucide/svelte/icons/circle-check';
   import Droplets from '@lucide/svelte/icons/droplets';
   import Flame from '@lucide/svelte/icons/flame';
@@ -13,7 +13,7 @@
   import { formatTemp } from '../../lib/core/format';
   import { heaterTone } from '../../lib/core/gauge';
   import { t } from '../../lib/i18n/index.svelte';
-  import { capabilities, printer, settings, temperatures } from '../../lib/stores';
+  import { printer, settings, temperatures } from '../../lib/stores';
   import Button from '../../lib/ui/Button.svelte';
   import Card from '../../lib/ui/Card.svelte';
   import { dialogs } from '../../lib/ui/dialogs.svelte';
@@ -37,11 +37,8 @@
   const actionOptions = $derived<{ value: FilamentAction; label: string }[]>([
     { value: 'load', label: t('filament.load') },
     { value: 'unload', label: t('filament.unload') },
-    ...(capabilities.has('advancedPause') ? [{ value: 'change' as const, label: t('filament.change') }] : []),
+    { value: 'change', label: t('filament.change') },
   ]);
-  $effect(() => {
-    if (!actionOptions.some((a) => a.value === wizard.action)) wizard.action = 'load';
-  });
 
   // Heat-up step: move on as soon as the hot end is there.
   $effect(() => {
@@ -88,7 +85,6 @@
 
   const runText = $derived.by(() => {
     const kind = wizard.run?.kind;
-    if (kind === 'change') return t('filament.runChange');
     if (kind === 'purge') return t('filament.runPurge');
     if (wizard.firmware) return t(kind === 'load' ? 'filament.runFirmwareLoad' : 'filament.runFirmwareUnload');
     return t(kind === 'load' ? 'filament.runLoad' : 'filament.runUnload');
@@ -102,7 +98,7 @@
 
   <ol class="steps" aria-label={t('filament.wizard')}>
     {#each wizard.steps as step, index (step)}
-      {@const current = wizard.steps.indexOf(wizard.step)}
+      {@const current = wizard.steps.indexOf(wizard.current)}
       <!-- Only the current step is spelled out: six labels do not fit the card. -->
       <li class:done={index < current} class:current={index === current} aria-label={t(`filament.step.${step}`)}>
         <span class="num">{index + 1}</span>{#if index === current}{t(`filament.step.${step}`)}{/if}
@@ -161,10 +157,10 @@
     {:else if wizard.step === 'insert'}
       <div class="center">
         <Hand size={64} strokeWidth={1.4} aria-hidden="true" />
-        <p class="message">{t('filament.insert')}</p>
+        <p class="message">{t(wizard.action === 'change' ? 'filament.swap' : 'filament.insert')}</p>
       </div>
       <div class="row">
-        <Button size="lg" onclick={() => wizard.cancel()}>{t('common.cancel')}</Button>
+        <Button size="lg" onclick={() => wizard.cancel()} data-testid="wizard-cancel">{t('common.cancel')}</Button>
         <Button variant="primary" size="lg" icon={Play} onclick={() => wizard.execute('load')} data-testid="wizard-load">
           {t('filament.load')}
         </Button>
@@ -180,20 +176,18 @@
       </div>
       <div class="row">
         <Button size="lg" onclick={() => wizard.cancel()} data-testid="wizard-stop">{t('filament.stop')}</Button>
-        {#if wizard.run?.kind === 'change'}
-          <Button variant="primary" size="lg" onclick={() => wizard.finishRun()}>{t('filament.changeDone')}</Button>
-        {/if}
       </div>
     {:else if wizard.step === 'purge'}
       <div class="center">
         <Droplets size={64} strokeWidth={1.4} aria-hidden="true" />
         <p class="message">{t('filament.purgeQuestion')}</p>
-      </div>
-      <div class="row">
         <Button size="lg" icon={Droplets} onclick={() => wizard.execute('purge')} data-testid="wizard-purge">
           {t('filament.purgeMore', { value: f.purgeLength })}
         </Button>
-        <Button variant="primary" size="lg" icon={CircleCheck} onclick={() => (wizard.step = 'done')} data-testid="wizard-clean">
+      </div>
+      <div class="row">
+        <Button size="lg" onclick={() => wizard.cancel()} data-testid="wizard-cancel">{t('common.cancel')}</Button>
+        <Button variant="primary" size="lg" icon={CircleCheck} onclick={() => wizard.finish()} data-testid="wizard-clean">
           {t('filament.clean')}
         </Button>
       </div>
@@ -203,9 +197,11 @@
         <p class="message">{t(`filament.done.${wizard.action}`)}</p>
       </div>
       <div class="row">
-        <Button size="lg" icon={Snowflake} disabled={!printer.operational} onclick={coolDown} data-testid="wizard-cool">
-          {t('filament.coolDown')}
-        </Button>
+        {#if hotend?.target}
+          <Button size="lg" icon={Snowflake} disabled={!printer.operational} onclick={coolDown} data-testid="wizard-cool">
+            {t('filament.coolDown')}
+          </Button>
+        {/if}
         <Button variant="primary" size="lg" onclick={() => wizard.reset()} data-testid="wizard-finish">{t('filament.finish')}</Button>
       </div>
     {/if}

@@ -11,7 +11,7 @@ import { MACRO_COLORS, MACRO_ICONS } from './macros';
 import { sanitizeActions, type CustomAction } from './power';
 import { defaultTerminalFilters, type TerminalFilters } from './terminal';
 
-export const SETTINGS_VERSION = 7;
+export const SETTINGS_VERSION = 8;
 
 export type Language = 'en' | 'it';
 export const LANGUAGES: readonly Language[] = ['en', 'it'];
@@ -102,6 +102,8 @@ export interface Settings {
     purgeLength: number;
     /** No extrusion below this hotend temperature (Marlin's EXTRUDE_MINTEMP is 170 °C). */
     minTemp: number;
+    /** Turn the hot end off when a load, unload or change is done. */
+    coolDownAtEnd: boolean;
   };
   capabilities: { overrides: CapabilityOverrides };
   /** Manual stream URL; empty = the webcam configured in OctoPrint. */
@@ -169,6 +171,7 @@ export function defaultSettings(): Settings {
       unloadLength: 100,
       purgeLength: 20,
       minTemp: 170,
+      coolDownAtEnd: false,
     },
     capabilities: { overrides: defaultCapabilityOverrides() },
     webcam: { url: '' },
@@ -198,6 +201,8 @@ const MIGRATIONS: Record<number, (doc: Doc) => Doc> = {
   5: (doc) => doc,
   // v7 (session 8): `customActions` and `psu` from the defaults.
   6: (doc) => doc,
+  // v8 (session 10): `filament.coolDownAtEnd` (default off) from the defaults.
+  7: (doc) => doc,
 };
 
 const isObject = (v: unknown): v is Doc => typeof v === 'object' && v !== null && !Array.isArray(v);

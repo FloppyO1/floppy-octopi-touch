@@ -9,6 +9,7 @@
   import InputField from '../../lib/ui/InputField.svelte';
   import Modal from '../../lib/ui/Modal.svelte';
   import Select from '../../lib/ui/Select.svelte';
+  import Toggle from '../../lib/ui/Toggle.svelte';
   import { toast } from '../../lib/ui/toast.svelte';
 
   interface Props {
@@ -34,7 +35,7 @@
   }
 </script>
 
-<Modal title={t('extruder.title')} icon={Settings2} tone="accent" {onclose} width={760} testid="filament-setup">
+<Modal title={t('extruder.title')} icon={Settings2} tone="accent" {onclose} width={900} testid="filament-setup">
   <div class="form">
     <Select label={t('extruder.type')} bind:value={draft.extruderType} options={types} testid="extruder-type" />
     <InputField
@@ -53,6 +54,9 @@
     <InputField type="number" label={t('extruder.fastFeedrate')} bind:value={draft.fastFeedrate} unit=" mm/min" min={60} max={6000} />
     <InputField type="number" label={t('extruder.purgeLength')} bind:value={draft.purgeLength} unit=" mm" min={0} max={200} />
     <InputField type="number" label={t('extruder.minTemp')} bind:value={draft.minTemp} unit="°C" min={0} max={300} testid="extruder-mintemp" />
+    <div class="wide" data-testid="extruder-cooldown">
+      <Toggle label={t('extruder.coolDownAtEnd')} hint={t('extruder.coolDownAtEndHint')} bind:checked={draft.coolDownAtEnd} />
+    </div>
   </div>
   <p class="hint">{t('extruder.hint')}</p>
   {#snippet actions()}
@@ -64,10 +68,13 @@
 <style>
   .form {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(3, 1fr);
     gap: var(--sp-2) var(--sp-4);
     color: var(--text);
     font-size: var(--fs-md);
+  }
+  .wide {
+    grid-column: 1 / -1;
   }
   .hint {
     margin: var(--sp-3) 0 0;

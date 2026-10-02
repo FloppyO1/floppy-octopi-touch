@@ -5,9 +5,12 @@ import {
   canExtrude,
   extrudeGcode,
   loadMoves,
+  markerTokens,
   movesDuration,
+  progressStep,
   reachedTarget,
   splitMove,
+  stepAfterRun,
   unloadMoves,
   wizardSteps,
 } from './filament';
@@ -121,13 +124,26 @@ describe('filament', () => {
     expect(movesDuration([{ length: 100, feedrate: 150 }, { length: -25, feedrate: 1500 }])).toBeCloseTo(41);
   });
 
-  it('uses the firmware commands when enabled and marks the end with M400 + M114', () => {
-    expect(actionGcode('load', f, true)).toEqual({ commands: ['M701', 'M400', 'M114'], seconds: null });
-    expect(actionGcode('unload', f, true).commands[0]).toBe('M702');
-    expect(actionGcode('change', f, false).commands[0]).toBe('M600');
-    const purge = actionGcode('purge', f, true);
-    expect(purge.commands).toEqual(['M83', 'G1 E20 F150', 'M82', 'M400', 'M114']);
+  it('uses the firmware commands when enabled and marks the end with M400 + an echoed marker', () => {
+    expect(actionGcode('load', f, true, '42')).toEqual({
+      commands: ['M701', 'M400', 'M118 E1 FOT-DONE 42'],
+      seconds: null,
+    });
+    expect(actionGcode('unload', f, true, '42').commands[0]).toBe('M702');
+    const purge = actionGcode('purge', f, true, '7');
+    expect(purge.commands).toEqual(['M83', 'G1 E20 F150', 'M82', 'M400', 'M118 E1 FOT-DONE 7']);
     expect(purge.seconds).toBeCloseTo(8);
+  });
+
+  it('reads the echoed markers only from received lines', () => {
+    expect(
+      markerTokens([
+        'Send: N9 M118 E1 FOT-DONE 123*44',
+        'Recv: echo:FOT-DONE 123',
+        'Recv: FOT-DONE 9',
+        'Recv: X:0.00 Y:0.00 Z:0.00 E:20.00 Count X:0 Y:0 Z:0',
+      ]),
+    ).toEqual(['123', '9']);
   });
 
   it('protects against cold extrusion and detects the heated hot end', () => {
@@ -138,8 +154,16 @@ describe('filament', () => {
     expect(reachedTarget(190, 200)).toBe(false);
   });
 
-  it('lists the wizard steps per action', () => {
-    expect(wizardSteps('load')).toEqual(['material', 'heat', 'insert', 'run', 'purge', 'done']);
-    expect(wizardSteps('unload')).toEqual(['material', 'heat', 'run', 'done']);
+  it('lists the wizard steps per action; a change unloads, then loads', () => {
+    expect(wizardSteps('load')).toEqual(['material', 'heat', 'insert', 'load', 'purge', 'done']);
+    expect(wizardSteps('unload')).toEqual(['material', 'heat', 'unload', 'done']);
+    expect(wizardSteps('change')).toEqual(['material', 'heat', 'unload', 'insert', 'load', 'purge', 'done']);
+    expect(progressStep('run', 'unload')).toBe('unload');
+    expect(progressStep('run', 'purge')).toBe('purge');
+    expect(progressStep('insert', null)).toBe('insert');
+    expect(stepAfterRun('change', 'unload')).toBe('insert');
+    expect(stepAfterRun('unload', 'unload')).toBe('done');
+    expect(stepAfterRun('change', 'load')).toBe('purge');
+    expect(stepAfterRun('load', 'purge')).toBe('purge');
   });
 });

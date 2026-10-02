@@ -122,7 +122,7 @@ describe('migrateSettings', () => {
 
   it('migrates v6 documents to v7: no custom actions, PSU off the status bar, broken actions repaired', () => {
     expect(migrateSettings({ schemaVersion: 6 }).settings).toMatchObject({
-      schemaVersion: 7,
+      schemaVersion: SETTINGS_VERSION,
       customActions: [],
       psu: { statusBar: false },
     });
@@ -148,6 +148,13 @@ describe('migrateSettings', () => {
         statusBar: false,
       },
     ]);
+  });
+
+  it('migrates v7 documents to v8: no cooling at the end of the filament wizard', () => {
+    const { settings, changed } = migrateSettings({ schemaVersion: 7, filament: { extruderType: 'direct', purgeLength: 30 } });
+    expect(changed).toBe(true);
+    expect(settings.schemaVersion).toBe(8);
+    expect(settings.filament).toMatchObject({ extruderType: 'direct', purgeLength: 30, coolDownAtEnd: false });
   });
 
   it('keeps documents from a newer release without downgrading them', () => {

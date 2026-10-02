@@ -1,5 +1,5 @@
 <script lang="ts">
-  // Filament: guided wizard (load/unload/M600 change) and manual extrude/retract. Locked during a job,
+  // Filament: guided wizard (load/unload/change) and manual extrude/retract. Locked during a job,
   // where only the firmware's filament change (M600) is offered.
   import Lock from '@lucide/svelte/icons/lock';
   import RefreshCcw from '@lucide/svelte/icons/refresh-ccw';
@@ -20,7 +20,7 @@
     const ok = await dialogs.confirm({
       title: t('filament.m600Title'),
       message: t('filament.m600Message'),
-      confirmLabel: t('filament.change'),
+      confirmLabel: t('filament.m600'),
       tone: 'warning',
     });
     if (!ok) return;
@@ -38,7 +38,7 @@
       <Lock size={20} aria-hidden="true" />
       <span>{t('filament.locked')}</span>
       {#if capabilities.has('advancedPause') && printer.phase === 'printing'}
-        <Button variant="warning" icon={RefreshCcw} onclick={changeDuringPrint} data-testid="m600">{t('filament.change')}</Button>
+        <Button variant="warning" icon={RefreshCcw} onclick={changeDuringPrint} data-testid="m600">{t('filament.m600')}</Button>
       {/if}
     </div>
   {/if}

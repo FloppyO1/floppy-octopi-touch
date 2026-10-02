@@ -1,6 +1,6 @@
 /**
- * Filament load/unload/purge: G-code sequences built from the extruder settings, or the firmware's
- * own M701/M702/M600 when those capabilities are enabled.
+ * Filament load/unload/change/purge: G-code sequences built from the extruder settings, or the firmware's
+ * own M701/M702 when that capability is enabled. A change is an unload followed by a load.
  *
  * Moves are sent with relative extrusion (M83 … M82, like OctoPrint's own extrude command) and split
  * into pieces well below Marlin's EXTRUDE_MAXLENGTH (200 mm by default), which rejects longer moves.
@@ -66,22 +66,45 @@ export function movesDuration(moves: readonly ExtrudeMove[]): number {
   return moves.reduce((sum, m) => sum + (m.feedrate > 0 ? (Math.abs(m.length) / m.feedrate) * 60 : 0), 0);
 }
 
+/** One block of moves of the wizard; a change is an unload followed by a load. */
+export type RunKind = 'load' | 'unload' | 'purge';
+
 /**
- * Commands for a wizard step. `firmware` = the M701/M702 capability (load/unload) or M600 (change).
- * `M400` + `M114` are appended so that the `PositionUpdate` answering M114 marks the end of the moves.
+ * End marker of a wizard step: after `M400` (all moves done) the firmware echoes it back
+ * (`M118 E1 …` → `Recv: echo:FOT-DONE <token>`). A `PositionUpdate` is not enough: with
+ * AUTOREPORT_POS OctoPrint turns on M154 and Marlin reports the position every few seconds.
+ */
+export const markerCommand = (token: string) => `M118 E1 FOT-DONE ${token}`;
+const MARKER_RE = /^Recv:\s*(?:echo:\s*)?FOT-DONE\s+(\w+)/i;
+
+/** Tokens of the end markers in received log lines. */
+export function markerTokens(lines: readonly string[]): string[] {
+  return lines.flatMap((line) => {
+    const match = MARKER_RE.exec(line.trim());
+    return match ? [match[1]] : [];
+  });
+}
+
+/**
+ * Commands for a wizard step: G-code sequences, or M701/M702 when `firmware` (load/unload) is on.
+ * `M400` + the end marker are appended. `seconds` = nominal duration, `null` when the firmware
+ * drives the moves.
  */
 export function actionGcode(
-  action: FilamentAction | 'purge',
+  kind: RunKind,
   f: FilamentSettings,
   firmware: boolean,
+  token: string,
 ): { commands: string[]; seconds: number | null } {
-  const done = ['M400', 'M114'];
-  if (action === 'change') return { commands: ['M600', ...done], seconds: null };
-  if (firmware && action === 'load') return { commands: ['M701', ...done], seconds: null };
-  if (firmware && action === 'unload') return { commands: ['M702', ...done], seconds: null };
-  const moves = action === 'load' ? loadMoves(f) : action === 'unload' ? unloadMoves(f) : purgeMoves(f);
+  const done = ['M400', markerCommand(token)];
+  if (firmware && kind === 'load') return { commands: ['M701', ...done], seconds: null };
+  if (firmware && kind === 'unload') return { commands: ['M702', ...done], seconds: null };
+  const moves = kind === 'load' ? loadMoves(f) : kind === 'unload' ? unloadMoves(f) : purgeMoves(f);
   return { commands: [...extrudeGcode(moves), ...done], seconds: movesDuration(moves) };
 }
+
+/** A marker earlier than this share of the nominal duration is not trusted (the moves cannot be done). */
+export const MIN_DURATION_SHARE = 0.5;
 
 /** The hot end is hot enough to move filament (cold extrusion protection). */
 export function canExtrude(actual: number | null | undefined, minTemp: number): boolean {
@@ -93,10 +116,24 @@ export function reachedTarget(actual: number | null | undefined, target: number)
   return actual != null && actual >= target - AT_TARGET_TOLERANCE;
 }
 
+/** Steps of the wizard state; `insert` is also "swap the filament" of a change. */
 export type WizardStep = 'material' | 'heat' | 'insert' | 'run' | 'purge' | 'done';
+/** Steps of the progress row: a running step is shown by what it does. */
+export type ProgressStep = Exclude<WizardStep, 'run'> | 'load' | 'unload';
 
-/** Steps shown in the wizard's progress row. */
-export function wizardSteps(action: FilamentAction): WizardStep[] {
-  if (action === 'load') return ['material', 'heat', 'insert', 'run', 'purge', 'done'];
-  return ['material', 'heat', 'run', 'done'];
+export function wizardSteps(action: FilamentAction): ProgressStep[] {
+  if (action === 'load') return ['material', 'heat', 'insert', 'load', 'purge', 'done'];
+  if (action === 'unload') return ['material', 'heat', 'unload', 'done'];
+  return ['material', 'heat', 'unload', 'insert', 'load', 'purge', 'done'];
+}
+
+export function progressStep(step: WizardStep, run: RunKind | null): ProgressStep {
+  if (step !== 'run') return step;
+  return run === 'unload' ? 'unload' : run === 'purge' ? 'purge' : 'load';
+}
+
+/** Where the wizard goes when a run of `kind` is over. */
+export function stepAfterRun(action: FilamentAction, kind: RunKind): WizardStep {
+  if (kind === 'unload') return action === 'change' ? 'insert' : 'done';
+  return 'purge';
 }

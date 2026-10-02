@@ -9,6 +9,7 @@ import type {
   EventPayload,
   PluginPayload,
 } from '../api/types';
+import { markerTokens } from '../core/filament';
 import { positionFromEvent } from '../core/move';
 import { capabilities } from './capabilities.svelte';
 import { connection } from './connection.svelte';
@@ -89,6 +90,8 @@ function handleCurrent(current: CurrentPayload, isHistory: boolean): void {
     terminal.append(current.logs);
     // Old lines from `history` must not re-open prompts that were already answered.
     prompt.ingest(current.logs);
+    // End markers of the filament wizard (`M118 E1 FOT-DONE <token>`).
+    for (const token of markerTokens(current.logs ?? [])) events.emit('fot:marker', { token });
   }
   // History lines are the recent past: good enough to know the fan/feed rate/flow after a reload.
   tune.ingest(current.logs);

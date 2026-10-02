@@ -754,7 +754,14 @@ async function moveScreen(page) {
   log('move', 'homed, jogged, clamped at X 220 (profile), Z edge refused, motors off');
 }
 
-// Filament: extruder setup, manual extrusion, load wizard (heat → insert → load → purge) and unload.
+const waitToolTarget = (page, target) =>
+  page.waitForFunction(
+    async (target) => (await (await fetch('/api/printer')).json()).temperature?.tool0?.target === target,
+    target,
+    { timeout: 15_000, polling: 500 },
+  );
+
+// Filament: extruder setup, manual extrusion, load wizard (heat → insert → load → purge), unload, cancel, change.
 async function filamentScreen(page) {
   await page.goto(`${BASE_URL}/#/filament`);
   await page.waitForSelector('[data-testid=wizard][data-step=material]');
@@ -780,9 +787,10 @@ async function filamentScreen(page) {
   await page.screenshot({ path: `${OUT}/filament-run.png` });
   await page.waitForSelector('[data-testid=wizard][data-step=purge]', { timeout: 60_000 });
   if (DEV) await terminalHas(page, 'G1 E20 F150');
+  if (DEV) await terminalHas(page, 'echo:FOT-DONE');
   await page.getByTestId('wizard-clean').click();
   await page.getByTestId('wizard-finish').click();
-  log('load wizard', 'PLA heated, 20 mm loaded (M83/G1/M400/M114), purge → done');
+  log('load wizard', 'PLA heated, 20 mm loaded (M83/G1/M400/M118 marker), purge → done');
 
   await waitDisabled(page, 'manual-extrude', false);
   await page.screenshot({ path: `${OUT}/filament-hot.png` });
@@ -800,10 +808,42 @@ async function filamentScreen(page) {
   await page.getByTestId('filament-action-load').click();
   log('unload wizard', 'retracted 100 mm, hotend cooled; manual extrude sent');
 
+  // Cancel at any step turns the heating off.
+  await page.getByTestId('wizard-start').click();
+  await page.waitForSelector('[data-testid=wizard][data-step=insert]', { timeout: 60_000 });
+  await page.getByTestId('wizard-cancel').click();
+  await page.getByText('Cancelled: hotend turned off').waitFor();
+  await waitToolTarget(page, 0);
+  log('wizard cancel', 'back to the start, hotend off');
+
+  // Change = unload → swap → load → purge; with "cool down at the end" the hotend goes off by itself.
+  await page.getByTestId('filament-setup-open').click();
+  const coolSwitch = page.getByTestId('extruder-cooldown').getByRole('switch');
+  if ((await coolSwitch.getAttribute('aria-checked')) !== 'true') await coolSwitch.click();
+  await page.getByTestId('extruder-save').click();
+  await page.waitForSelector('[data-testid=filament-setup]', { state: 'detached' });
+  await page.getByTestId('filament-action-change').click();
+  await page.getByTestId('wizard-start').click();
+  await page.waitForSelector('[data-testid=wizard][data-step=insert]', { timeout: 60_000 });
+  if (DEV) await terminalHas(page, 'G1 E-100 F1500');
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: `${OUT}/filament-swap.png` });
+  await page.getByTestId('wizard-load').click();
+  await page.waitForSelector('[data-testid=wizard][data-step=purge]', { timeout: 60_000 });
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: `${OUT}/filament-purge.png` });
+  await page.getByTestId('wizard-clean').click();
+  await page.waitForSelector('[data-testid=wizard][data-step=done]');
+  await page.getByText('Hotend turned off', { exact: true }).waitFor();
+  await waitToolTarget(page, 0);
+  await page.waitForSelector('[data-testid=wizard-cool]', { state: 'detached', timeout: 10_000 });
+  await page.getByTestId('wizard-finish').click();
+  log('change wizard', 'unloaded, swapped, loaded, purged, cooled down at the end');
+
   // Back to the prudent defaults, so the next run sees the first-use warning again.
   await page.evaluate(async () => {
     const doc = await (await fetch('/local/settings')).json();
-    doc.filament = { ...doc.filament, extruderType: 'unknown', configured: false, loadSlowLength: 100 };
+    doc.filament = { ...doc.filament, extruderType: 'unknown', configured: false, loadSlowLength: 100, coolDownAtEnd: false };
     await fetch('/local/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(doc) });
   });
   await page.reload(); // the settings store would otherwise write its copy back later
