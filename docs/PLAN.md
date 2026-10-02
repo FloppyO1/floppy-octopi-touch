@@ -32,7 +32,7 @@ Procedura:
    - In qualsiasi sessione: quando serve una decisione che il piano non copre.
 6. Chiusura: checklist della sezione 3, con **versione = 0.N.0** e tag `v0.N.0` per la Sessione N
    (eccezioni: Sessione 9b → `0.9.1` / `v0.9.1`; **Sessione finale** → `1.0.0` / `v1.0.0`; quindi Sessione 10 → `0.10.0`,
-   Sessione 11 → `0.11.0`). Marcare la riga come `[x]` con la data, aggiungere le note
+   Sessione 11 → `0.11.0`, Sessione 12 → `0.12.0`). Marcare la riga come `[x]` con la data, aggiungere le note
    in "Note tra sessioni".
 7. **Fermarsi.** Non iniziare la sessione successiva: l'utente riavvierà con lo stesso prompt in una nuova sessione.
 
@@ -580,6 +580,64 @@ Leggi docs/PLAN.md e CLAUDE.md. Esegui la Sessione 11:
 - Chiusura sessione (sezione 3) con versione 0.11.0 e tag v0.11.0 locale, poi FERMATI.
 ```
 
+### Sessione 12 — Data, ora e fuso orario; cosa succede dopo lo Stop
+Aggiunta il 2026-10-02 su richiesta dell'utente. Decisioni prese con l'utente:
+- **fuso orario del Raspberry** (non solo dell'app): un solo orario per sistema, OctoPrint, log e app;
+- **fuso da elenco** (ora legale/solare automatica con i fusi IANA, es. `Europe/Rome`) **più data e ora manuali** per
+  quando il Pi non ha internet/NTP; niente interruttore manuale legale/solare (fusi a offset fisso sconsigliati);
+- nuova sezione **"Data e ora"** in Sistema → Impostazioni (il formato 24h si sposta lì da Generale);
+- dopo lo **Stop**: motori spenti (`M84`), riscaldatori spenti, ventola spenta, ottenuti con lo **script di OctoPrint**
+  `afterPrintCancelled` (vale anche per gli Stop dall'interfaccia web di OctoPrint), non con comandi mandati dall'app:
+  l'app **controlla** lo script e propone di correggerlo, con una riga in Impostazioni e un avviso una sola volta.
+- Già verificato il 2026-10-02 nel container di dev (OctoPrint 1.11.8): lo script di default è
+  `; disable motors / M84 / {% snippet 'disable_hotends' %} / {% snippet 'disable_bed' %} / M106 S0`, letto da
+  `GET /api/settings` → `scripts.gcode.afterPrintCancelled` (gli snippet in `scripts.gcode["snippets/…"]`). Quindi se
+  sul Pi dell'utente i motori restano accesi dopo lo Stop, lo script è stato modificato oppure qualcosa li riattiva:
+  da controllare sul Pi (Sessione finale).
+```
+Leggi docs/PLAN.md e CLAUDE.md. Esegui la Sessione 12 (niente test sul Pi: vanno nella Sessione finale):
+1. Data, ora e fuso orario del Raspberry.
+   - Verifiche prima di scrivere codice (non inventare): su OctoPi 1.1.0 / Bookworm chi sincronizza l'ora
+     (`systemd-timesyncd`? `timedatectl show` e `timedatectl timesync-status`), `timedatectl set-timezone`,
+     `set-ntp false|true`, `set-time` (rifiutato con NTP attivo); il Pi non ha RTC: l'ora manuale sopravvive al
+     riavvio solo tramite `fake-hwclock` (verificare se c'è); se Chromium nel kiosk segue da solo il cambio di
+     `/etc/localtime` (altrimenti riavviare il kiosk dopo il cambio, con l'endpoint che esiste già). Se una verifica
+     non si può fare in Docker, scriverla nell'elenco della Sessione finale.
+   - Agent: `GET /local/time` (fuso attuale, ora locale e UTC, offset, ora legale sì/no, NTP attivo e sincronizzato,
+     elenco dei fusi da `timedatectl list-timezones`), `POST /local/time` (`timezone`, `ntp`, `datetime`). Gli argomenti
+     passano solo da uno script wrapper in `deploy/time/` che li valida (fuso presente nell'elenco, data in formato
+     fisso), eseguito con sudo come `usb-mount.sh`: nuova riga in `deploy/sudoers/floppyoctotouch.in` per quello
+     script, mai `timedatectl` con argomenti liberi. In dev (niente systemd nel container) un backend finto o
+     "non disponibile" chiaro nella UI; pytest con `run_command` finto.
+   - UI: Sistema → Impostazioni → nuova sezione **Data e ora**: ora attuale e fuso, scelta del fuso a due livelli
+     (regione → città, elenchi toccabili con ricerca da tastiera a schermo, target ≥ 56 px), interruttore "Ora
+     automatica (internet)", data e ora manuali (NumPad/selettori, abilitati solo con l'ora automatica spenta, conferma
+     prima di applicare), formato 24h spostato qui da Generale (stessa chiave `clock24h`, nessuna migrazione). Dopo il
+     cambio l'orologio della status bar, ETA e screensaver mostrano subito la nuova ora. i18n en + it.
+   - Installer: regola sudoers e script wrapper installati (e tolti da `uninstall.sh`); deploy-test aggiornato.
+2. Dopo lo Stop: motori, riscaldatori e ventola spenti tramite lo script `afterPrintCancelled` di OctoPrint.
+   - Verifiche: come OctoPrint 1.11 salva lo script (`POST /api/settings` con `scripts.gcode.afterPrintCancelled`?
+     servono i permessi da amministratore), che lo script giri anche per gli Stop dall'interfaccia web, e cosa succede
+     a `M84` mentre la coda dei movimenti si svuota (provare nel dev con la Virtual Printer).
+   - `core/` (con test): analisi dello script (Jinja con gli snippet): motori spenti se c'è `M84` / `M18`, riscaldatori
+     se ci sono gli snippet `disable_hotends` / `disable_bed` o `M104 S0` / `M140 S0` (per ogni estrusore del profilo),
+     ventola se c'è `M106 S0` / `M107`; righe commentate ignorate. Correzione = aggiungere in fondo solo le righe che
+     mancano, senza toccare il resto dello script dell'utente.
+   - UI: riga **"Dopo lo Stop"** in Sistema → Impostazioni → Movimento con lo stato (motori / riscaldatori / ventola) e
+     il pulsante "Correggi": dialog di conferma con l'anteprima delle righe aggiunte; senza permessi (403) o se il
+     salvataggio fallisce → passi manuali (OctoPrint → Impostazioni → GCODE Scripts). **Avviso una sola volta** dopo la
+     connessione se manca qualcosa (con "Correggi" e "Non ora"; "non mostrare più" salvato nelle impostazioni: nuova
+     `schemaVersion` con migrazione e test).
+   - Smoke test Playwright: script di default (tutto ok), script senza `M84` (avviso, Correggi, script salvato in
+     OctoPrint), poi rimettere lo script di default nel container.
+- README (impostazioni Data e ora, cosa fa lo Stop), ARCHITECTURE (`/local/time`, wrapper, controllo dello script),
+  CHANGELOG, CLAUDE.md. Screenshot 1024×600 della sezione Data e ora e del dialog "Dopo lo Stop".
+- Da provare sul Pi (aggiungere all'elenco della Sessione finale): cambio fuso e ora manuale, cosa resta dopo un
+  riavvio senza rete, ritorno all'ora automatica; script del Pi prima della correzione (perché i motori restavano
+  accesi) e Stop vero con la stampante (motori liberi, riscaldatori e ventola spenti).
+- Chiusura sessione (sezione 3) con versione 0.12.0 e tag v0.12.0 locale, poi FERMATI.
+```
+
 ### Sessione finale — Test sul Raspberry reale e rilascio 1.0.0
 **Resta sempre l'ultima sessione**: le nuove sessioni si aggiungono prima di questa (anche in "Stato avanzamento").
 Raccoglie tutte le prove sul Pi con la stampante; stop dopo ogni passo (l'utente ha il Pi davanti e riporta l'esito).
@@ -606,7 +664,10 @@ Leggi docs/PLAN.md e CLAUDE.md. Esegui la Sessione finale (io ho il Raspberry da
     (da v0.10.0 solo con `--display-config`): la risoluzione 1024×600 deve arrivare comunque dal kiosk;
   - app scalata se lo schermo parte con un'altra modalità (es. Sistema → Impostazioni → Schermo senza confermare),
     fluidità della Home con la webcam (tolto il blur sopra la webcam), primo caricamento della schermata Temperature
-    (grafico caricato a richiesta).
+    (grafico caricato a richiesta);
+  - data e ora (Sessione 12): cambio del fuso, ora manuale senza rete e cosa resta dopo un riavvio, ritorno all'ora
+    automatica; Stop di una stampa vera: script `afterPrintCancelled` del Pi prima della correzione (perché i motori
+    restavano accesi), poi motori liberi, riscaldatori e ventola spenti dopo lo Stop.
 - Correggere i bug trovati (se sono tanti, spezzare la sessione in parti con stop fra l'una e l'altra).
 - README finale con screenshot reali (controllare che non mostrino IP, SSID o altri dati), CHANGELOG.
 - Chiusura sessione (sezione 3) con versione 1.0.0 e tag v1.0.0 locale, poi FERMATI.
@@ -634,6 +695,9 @@ Leggi docs/PLAN.md e CLAUDE.md. Esegui la Sessione finale (io ho il Raspberry da
 | Plugin Cancel Objects non mantenuto / incompatibile con OctoPrint 1.11 | Verifica nel container a inizio Sessione 11, versione fissata; se rotto stop e decisione dell'utente (fork o plugin nostro) |
 | Installazione del plugin che disturba OctoPrint | Solo via API del Plugin Manager, versione fissata, mai riavvio durante la stampa, uninstall solo se installato da noi |
 | G-code senza etichette degli oggetti (slicer non configurato) | Pulsante nascosto; README con l'impostazione "Label objects" dello slicer |
+| Cambio di data/ora come root dall'agent | Solo tramite uno script wrapper che valida gli argomenti, una riga sudoers per quello script |
+| Pi senza RTC: l'ora manuale si perde al riavvio senza rete | Verificare `fake-hwclock`; avviso nella UI quando l'ora non è sincronizzata |
+| Modifica dello script `afterPrintCancelled` dell'utente | Solo righe aggiunte in fondo, anteprima e conferma; mai riscrivere il resto |
 
 ---
 
@@ -653,6 +717,7 @@ _Legenda: `[ ]` da fare · `[~]` in corso (interrotta se la trovi a inizio sessi
 - [x] Sessione 9b — Installazione in un solo comando (2026-09-27, v0.9.1)
 - [x] Sessione 10 — Correzioni dal Pi e rifinitura (iniziata 2026-09-27, ripresa e chiusa il 2026-10-02, v0.10.0; i test sul Pi sono nella Sessione finale)
 - [~] Sessione 11 — Rimozione di oggetti dalla stampa in corso, v0.11.0 (aggiunta il 2026-09-27 come v1.1.0; iniziata 2026-09-27 sul branch `session-11`, ora su `main`; manca solo la chiusura, la verifica sul Pi è nella Sessione finale; il codice è già nella v0.10.0)
+- [ ] Sessione 12 — Data, ora e fuso orario; cosa succede dopo lo Stop, v0.12.0 (aggiunta il 2026-10-02)
 - [ ] Sessione finale — Test sul Raspberry reale e rilascio 1.0.0 (resta sempre l'ultima riga: le nuove sessioni si aggiungono sopra)
 
 ### Note tra sessioni
@@ -1383,3 +1448,10 @@ _(ogni sessione aggiunge qui decisioni prese, deviazioni dal piano, problemi ape
   annulla che spegne, cambia filamento, marcatore M118 di fine passo, raffreddamento a fine), avviso del kernel a 32 bit,
   installazione nuova senza righe del display (risoluzione 1024×600 dal kiosk), scala dell'app se lo schermo sceglie
   un'altra modalità, fluidità con la webcam senza blur.
+
+**Modifica al piano (2026-10-02, dopo la Sessione 10)**
+- Su richiesta dell'utente aggiunta la **Sessione 12** (v0.12.0, prima della Sessione finale): data, ora e fuso orario
+  del Raspberry dalle impostazioni (fuso IANA con ora legale automatica + ora manuale senza NTP, nuova sezione "Data e
+  ora") e motori, riscaldatori e ventola spenti dopo lo Stop tramite lo script `afterPrintCancelled` di OctoPrint
+  (controllo e correzione dall'app, avviso una sola volta). Le prove sul Pi sono nell'elenco della Sessione finale.
+- La Sessione 11 resta `[~]` (manca solo la chiusura formale): la sezione 0 la esegue prima della 12.
