@@ -6,6 +6,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-10-02
+
+### Changed
+- Closes the "cancel single objects" milestone. Its features (Home → Objects, agent `GET /local/objects`, the
+  `M486` / Cancel Objects plugin mechanism, the installer question) already shipped in 0.10.0; this version has
+  no code changes. The test with a real printer is part of the 1.0.0 hardware checks.
+
 ## [0.10.0] - 2026-10-02
 
 ### Added

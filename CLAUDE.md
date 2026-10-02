@@ -249,6 +249,9 @@ dev/deploy-test/               installer test on Debian bookworm (run.sh, fake_o
 
 ## Current state
 
+v0.11.0 (session 11 closed formally: cancel objects — agent `/local/objects`, Home "Objects" dialog, M486 or the
+Cancel Objects plugin, installer question — already shipped in 0.10.0, no code changes). Next: session 12 (date,
+time and time zone of the Pi; motors/heaters/fan off after Stop via `afterPrintCancelled`), then the final session.
 v0.10.0 (session 10, fixes from the Pi and polish): a heater target changed during a blocking heat-up applies at
 once with EMERGENCY_PARSER (new wait + M108), filament wizard with Change (unload + load), cancel turning the hotend
 off, "cool down at the end" (settings v8) and an `M118` end marker; installer without the display question (lines
@@ -256,9 +259,7 @@ only with `--display-config`), 32-bit kernel warning, message before apt; the ap
 uPlot lazy-loaded (main bundle 129 KB gzip); kiosk watchdog, webcam recovery, resolution setting and the OctoPi 1.1.0
 fixes. v0.9.x: one-command installer (sudo re-exec, questions first, agent + kiosk units with cage + Chromium on
 tty1, read-only USB automount, update/uninstall, bookworm installer test, now 133 checks), running on a real Pi.
-Before: every screen (sessions 3-8). Session 11 (cancel objects: agent `/local/objects`, Home "Objects" dialog,
-M486 or the Cancel Objects plugin, installer question) is merged into `main` and already shipped in 0.10.0; only its
-closure (v0.11.0) is left. All the tests on the Pi (hardware checklist, cancel objects with the printer, the session
-10 fixes) are in the final session (v1.0.0).
+Before: every screen (sessions 3-8). All the tests on the Pi (hardware checklist, cancel objects with the printer,
+the session 10 fixes) are in the final session (v1.0.0).
 Repository: `https://github.com/FloppyO1/floppy-octopi-touch` (README clone commands, About screen).
 See `docs/PLAN.md` for details and notes between sessions.
