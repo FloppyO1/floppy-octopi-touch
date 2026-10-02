@@ -1220,7 +1220,7 @@ async function systemScreen(page) {
 
   // Settings: every section renders; values go through the NumPad and the stored document.
   await page.getByTestId('system-tab-settings').click();
-  for (const section of ['general', 'display', 'temperature', 'motion', 'firmware', 'power', 'connection']) {
+  for (const section of ['general', 'datetime', 'display', 'temperature', 'motion', 'firmware', 'power', 'connection']) {
     await page.getByTestId(`settings-${section}`).click();
     await page.waitForSelector(`[data-testid=settings-panel-${section}]`);
     await page.waitForTimeout(250);
@@ -1408,6 +1408,181 @@ async function gallery(page) {
   log('gallery', 'rendered, keyboard sheet opens');
 }
 
+const getTimeState = (page) => page.evaluate(async () => (await fetch('/local/time')).json());
+// Wall clock of `zone` as the status bar shows it (24 h); the Playwright container runs in UTC.
+const clockIn = (page, zone, epochMs) =>
+  page.evaluate(
+    ([zone, ms]) =>
+      new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: zone }).format(
+        ms ?? Date.now(),
+      ),
+    [zone, epochMs],
+  );
+
+// Date and time (agent backend `fake` in dev): time zone picker, the clock in the Pi's zone,
+// automatic time off, manual clock with confirmation, then everything back.
+async function dateTime(page) {
+  await page.goto(`${BASE_URL}/#/system`);
+  await api(page, 'POST', '/local/time', { timezone: 'Etc/UTC', ntp: true });
+  await page.goto('about:blank');
+  await page.goto(`${BASE_URL}/#/system`);
+  await page.waitForSelector('[data-testid=connection-overlay]', { state: 'detached', timeout: 60_000 });
+  await page.getByTestId('system-tab-settings').click();
+  await page.getByTestId('settings-datetime').click();
+  await waitText(page, 'datetime-zone-line', (t) => t.includes('UTC'));
+  await waitText(page, 'datetime-zone', (t) => /Change time zone/.test(t));
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: `${OUT}/settings-datetime.png` });
+
+  // Two levels: back to the regions, America, search "buenos" with the keyboard, pick it.
+  await page.getByTestId('datetime-zone').click();
+  await page.getByTestId('tz-back').click();
+  await page.waitForSelector('[data-testid=tz-region-Europe]');
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: `${OUT}/timezone-regions.png` });
+  await page.getByTestId('tz-region-America').click();
+  await page.getByTestId('tz-search').click();
+  await typeText(page, 'buenos');
+  const zone = 'America/Argentina/Buenos_Aires';
+  await page.waitForSelector(`[data-testid="tz-zone-${zone}"]`);
+  const found = await page.locator('[data-testid^=tz-zone-]').count();
+  if (found < 1 || found > 3) throw new Error(`search left ${found} cities`); // with the old alias America/Buenos_Aires
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: `${OUT}/timezone-cities.png` });
+  await page.getByTestId(`tz-zone-${zone}`).click();
+  await page.waitForSelector('[data-testid=timezone-picker]', { state: 'detached' });
+  await waitText(page, 'datetime-zone-line', (t) => t.includes('Buenos Aires') && t.includes('UTC−03:00'));
+  if ((await getTimeState(page)).timezone !== zone) throw new Error('time zone not applied by the agent');
+  // The status bar follows at once, although the browser itself still runs in UTC.
+  const expected = await clockIn(page, zone);
+  await page.waitForFunction(
+    ([sel, a]) => document.querySelector(sel)?.textContent?.trim() === a || new Date().getSeconds() < 2,
+    ['[data-testid=clock]', expected],
+  );
+  const shown = (await text(page, 'clock')).trim();
+  if (shown !== expected && shown !== (await clockIn(page, zone))) throw new Error(`status bar clock ${shown}, expected ${expected}`);
+  log('time zone', `${zone}: status bar ${shown} (browser in UTC)`);
+
+  // Manual clock: refused while the automatic time is on, then set through the fields.
+  if ((await api(page, 'POST', '/local/time', { datetime: '2030-01-15 07:45' })) !== 409) {
+    throw new Error('a manual time with NTP on must be refused');
+  }
+  await waitDisabled(page, 'datetime-apply', true);
+  await page.getByTestId('datetime-ntp').getByRole('switch').click();
+  await waitDisabled(page, 'datetime-apply', false);
+  await waitText(page, 'datetime-sync', (t) => /by hand/.test(t));
+  for (const [id, digits] of [['datetime-year', '2030'], ['datetime-month', '1'], ['datetime-day', '15'], ['datetime-hour', '7'], ['datetime-minute', '45']]) {
+    await page.getByTestId(id).click();
+    await numpadEnter(page, digits);
+  }
+  await page.getByTestId('datetime-apply').click();
+  await page.waitForSelector('[data-testid=confirm-dialog]');
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: `${OUT}/datetime-confirm.png` });
+  await confirmWith(page, 'Set the clock');
+  await page.getByText(/Clock set to/).waitFor();
+  const state = await getTimeState(page);
+  const pi = await clockIn(page, zone, state.now);
+  const year = await page.evaluate(([z, ms]) => new Intl.DateTimeFormat('en', { year: 'numeric', timeZone: z }).format(ms), [zone, state.now]);
+  if (state.ntp || !/^07:4[56]$/.test(pi) || year !== '2030') throw new Error(`manual clock not applied: ${year} ${pi}`);
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: `${OUT}/settings-datetime-manual.png` });
+  log('manual clock', `NTP off, agent clock ${year} ${pi} (${zone})`);
+
+  // Back to the automatic time and UTC, like the other steps expect.
+  await page.getByTestId('datetime-ntp').getByRole('switch').click();
+  await waitDisabled(page, 'datetime-apply', true);
+  await api(page, 'POST', '/local/time', { timezone: 'Etc/UTC', ntp: true });
+  const back = await getTimeState(page);
+  if (!back.ntp || back.timezone !== 'Etc/UTC' || Math.abs(back.now - Date.now()) > 10_000) throw new Error('clock not restored');
+}
+
+// OctoPrint 1.11's default script after Stop (also put back at the end of the step).
+const DEFAULT_CANCEL_SCRIPT =
+  "; disable motors\nM84\n\n;disable all heaters\n{% snippet 'disable_hotends' %}\n{% snippet 'disable_bed' %}\n;disable fan\nM106 S0";
+const BROKEN_CANCEL_SCRIPT = ";disable all heaters\n{% snippet 'disable_hotends' %}\nM106 S0";
+const setCancelScript = (page, script) =>
+  api(page, 'POST', '/api/settings', { scripts: { gcode: { afterPrintCancelled: script } } });
+const cancelScript = (page) =>
+  page.evaluate(async () => (await (await fetch('/api/settings')).json()).scripts.gcode.afterPrintCancelled);
+const openHome = async (page) => {
+  await page.goto('about:blank');
+  await page.goto(`${BASE_URL}/#/home`);
+  await page.waitForSelector('[data-testid=connection-overlay]', { state: 'detached', timeout: 60_000 });
+};
+const openMotionSettings = async (page) => {
+  await page.goto('about:blank');
+  await page.goto(`${BASE_URL}/#/system`);
+  await page.waitForSelector('[data-testid=connection-overlay]', { state: 'detached', timeout: 60_000 });
+  await page.getByTestId('system-tab-settings').click();
+  await page.getByTestId('settings-motion').click();
+  await page.waitForSelector('[data-testid=stop-script-status]');
+};
+const stopStates = (page) =>
+  page.$$eval('[data-testid^=stop-script-][data-state]', (items) => items.map((i) => i.dataset.state).join(' '));
+
+// After Stop: the default script is fine; a script without M84 and the bed is announced once,
+// fixed with a preview (only lines appended); a 403 shows the manual steps; "don't ask again".
+async function stopScriptFlow(page) {
+  await page.goto(`${BASE_URL}/#/home`);
+  if ((await setCancelScript(page, DEFAULT_CANCEL_SCRIPT)) !== 200) throw new Error('cannot set the cancel script');
+  await patchSettings(page, { stopScript: { remind: true } });
+  await openMotionSettings(page);
+  if ((await stopStates(page)) !== 'ok ok ok ok') throw new Error(`default script: ${await stopStates(page)}`);
+  if (await page.getByTestId('stop-script-notice').count()) throw new Error('notice with the default script');
+  await page.getByTestId('stop-script-status').scrollIntoViewIfNeeded();
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: `${OUT}/settings-motion-stop.png` });
+
+  await setCancelScript(page, BROKEN_CANCEL_SCRIPT);
+  await openHome(page);
+  await page.waitForSelector('[data-testid=stop-script-notice]', { timeout: 20_000 });
+  await page.waitForTimeout(400);
+  await page.screenshot({ path: `${OUT}/stop-script-notice.png` });
+  await page.getByTestId('stop-script-notice-fix').click();
+  await page.waitForSelector('[data-testid=confirm-dialog]');
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: `${OUT}/stop-script-fix.png` });
+  await confirmWith(page, 'Fix');
+  await page.getByText('Script after Stop fixed').waitFor();
+  const fixed = await cancelScript(page);
+  if (!fixed.startsWith(BROKEN_CANCEL_SCRIPT) || !/\nM140 S0\nM84\s*$/.test(fixed)) throw new Error(`fixed script: ${JSON.stringify(fixed)}`);
+  log('after stop', 'missing M84 / M140 announced, appended to the user script');
+
+  // A key without the SETTINGS permission: the manual steps instead.
+  await setCancelScript(page, BROKEN_CANCEL_SCRIPT);
+  await patchSettings(page, { stopScript: { remind: false } });
+  await openMotionSettings(page);
+  await page.waitForFunction(() => document.querySelector('[data-testid=stop-script-motors]')?.dataset.state === 'missing');
+  const forbid = (route) =>
+    route.request().method() === 'POST' ? route.fulfill({ status: 403, body: '{"error":"Forbidden"}' }) : route.continue();
+  await page.route('**/api/settings', forbid);
+  await page.getByTestId('stop-script-fix').click();
+  await page.getByTestId('confirm-dialog').getByRole('button', { name: 'Fix', exact: true }).click();
+  await page.getByText('GCODE Scripts').waitFor();
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: `${OUT}/stop-script-manual.png` });
+  await confirmWith(page, 'OK');
+  await page.unroute('**/api/settings', forbid);
+  if ((await cancelScript(page)) !== BROKEN_CANCEL_SCRIPT) throw new Error('script changed despite the 403');
+
+  // "Don't ask again" is saved; the next start stays quiet.
+  await patchSettings(page, { stopScript: { remind: true } });
+  await openHome(page);
+  await page.waitForSelector('[data-testid=stop-script-notice]', { timeout: 20_000 });
+  await page.getByTestId('stop-script-never').click();
+  await page.evaluate(() => window.__fot?.settings.flush());
+  await page.waitForFunction(async () => (await (await fetch('/local/settings')).json()).stopScript?.remind === false);
+  await openHome(page);
+  await page.waitForTimeout(3000);
+  if (await page.getByTestId('stop-script-notice').count()) throw new Error('notice after "don\'t ask again"');
+  log('after stop', '403 → manual steps, "don\'t ask again" kept');
+
+  await patchSettings(page, { stopScript: { remind: true } });
+  await setCancelScript(page, DEFAULT_CANCEL_SCRIPT);
+  if ((await cancelScript(page)) !== DEFAULT_CANCEL_SCRIPT) throw new Error('default script not restored');
+}
+
 try {
   const page = await browser.newPage({ viewport: VIEWPORT });
   page.on('console', (msg) => {
@@ -1427,6 +1602,8 @@ try {
     ['macros', macrosScreen, true],
     ['leveling', levelingScreen, true],
     ['system', systemScreen, true],
+    ['datetime', dateTime, true],
+    ['stopscript', stopScriptFlow, true],
     ['print', printFlow, true],
     ['objects', objectsFlow, true],
     ['screensaver', screensaver, DEV],

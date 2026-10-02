@@ -19,6 +19,8 @@ const VIEWS = [
   ['leveling', ['leveling-tab-z']],
   ['system', []],
   ['system', ['system-tab-settings']],
+  ['system', ['system-tab-settings', 'settings-datetime']],
+  ['system', ['system-tab-settings', 'settings-motion']],
   ['system', ['system-tab-about']],
 ];
 
