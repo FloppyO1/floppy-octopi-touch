@@ -646,7 +646,7 @@ _Legenda: `[ ]` da fare · `[~]` in corso (interrotta se la trovi a inizio sessi
 - [x] Sessione 8 — Sistema e Impostazioni (2026-09-25, v0.8.0)
 - [x] Sessione 9 — Installazione sul Raspberry (2026-09-25, v0.9.0; interrotta una volta e ripresa lo stesso giorno)
 - [x] Sessione 9b — Installazione in un solo comando (2026-09-27, v0.9.1)
-- [~] Sessione 10 — Correzioni dal Pi e rifinitura, v0.10.0 (iniziata 2026-09-27 come "Test reale e rifinitura"; segnata `[~]` il 2026-09-25 senza lavoro fatto, rimessa `[ ]` per fare prima la 9b; riorganizzata il 2026-09-27: i test sul Pi sono nella Sessione finale)
+- [~] Sessione 10 — Correzioni dal Pi e rifinitura, v0.10.0 (iniziata 2026-09-27 come "Test reale e rifinitura"; segnata `[~]` il 2026-09-25 senza lavoro fatto, rimessa `[ ]` per fare prima la 9b; riorganizzata il 2026-09-27: i test sul Pi sono nella Sessione finale; ripresa il 2026-10-02 dai punti 1-8)
 - [~] Sessione 11 — Rimozione di oggetti dalla stampa in corso, v0.11.0 (aggiunta il 2026-09-27 come v1.1.0; iniziata 2026-09-27 sul branch `session-11`, ora su `main`; manca solo la chiusura, la verifica sul Pi è nella Sessione finale)
 - [ ] Sessione finale — Test sul Raspberry reale e rilascio 1.0.0 (resta sempre l'ultima riga: le nuove sessioni si aggiungono sopra)
 
