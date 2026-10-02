@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { arcGeometry, arcPoint, gaugeFraction, heaterTone } from './gauge';
 import { editText, keyboardRows, keyChar, rowUnits, type KeyboardLayer } from './keyboard';
 import { applyNumpadKey, initialEntry, parseEntry, type NumpadKey } from './numpad';
+import { fitFor } from '../ui/fit';
 
 describe('gauge', () => {
   it('clamps the fraction and handles missing values', () => {
@@ -96,5 +97,14 @@ describe('keyboard', () => {
     expect(editText('G28', { key: 'enter' })).toBe('G28');
     expect(editText('G28', { key: 'enter' }, { multiline: true })).toBe('G28\n');
     expect(editText('abc', { char: 'd' }, { maxLength: 3 })).toBe('abc');
+  });
+});
+
+describe('fit to other screen sizes', () => {
+  it('leaves 1024x600 alone and scales other windows, centred', () => {
+    expect(fitFor(1024, 600)).toBeNull();
+    expect(fitFor(1920, 1080)).toEqual({ scale: 1.8, left: 38, top: 0 });
+    expect(fitFor(800, 480)).toEqual({ scale: 0.7813, left: 0, top: 6 });
+    expect(fitFor(0, 0)).toBeNull();
   });
 });

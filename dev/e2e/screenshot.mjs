@@ -1372,6 +1372,28 @@ async function kiosk(page) {
   });
   if (!result.kiosk || !result.blocked) throw new Error(`kiosk mode not active: ${JSON.stringify(result)}`);
   log('kiosk', 'cursor hidden, context menu blocked');
+
+  // Another screen size: the same layout, scaled to fit and centred; taps still land on the right button.
+  for (const [width, height] of [
+    [1920, 1080],
+    [800, 480],
+  ]) {
+    const other = await browser.newPage({ viewport: { width, height } });
+    await other.goto(`${BASE_URL}/?kiosk=1#/home`);
+    await other.waitForSelector('[data-testid=gauge-hotend]');
+    const scale = Math.min(width / 1024, height / 600);
+    const box = await other.locator('.shell').boundingBox();
+    const expected = { x: (width - 1024 * scale) / 2, y: (height - 600 * scale) / 2, width: 1024 * scale, height: 600 * scale };
+    if (Object.keys(expected).some((k) => Math.abs(box[k] - expected[k]) > 2)) {
+      throw new Error(`${width}x${height}: shell at ${JSON.stringify(box)}, expected ${JSON.stringify(expected)}`);
+    }
+    await other.getByTestId('nav-temperature').click();
+    await other.waitForSelector('[data-testid=screen-temperature]');
+    await other.waitForTimeout(500);
+    await other.screenshot({ path: `${OUT}/fit-${width}x${height}.png` });
+    await other.close();
+  }
+  log('other screens', '1920x1080 and 800x480: scaled to fit, centred, taps work');
 }
 
 async function gallery(page) {

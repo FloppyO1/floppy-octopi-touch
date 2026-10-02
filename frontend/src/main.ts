@@ -1,5 +1,6 @@
 import { mount } from 'svelte';
 import App from './App.svelte';
+import { fitToWindow } from './lib/ui/fit';
 import { enableKiosk, kioskRequested } from './lib/ui/kiosk';
 import { applyAccent, DEFAULT_ACCENT } from './lib/ui/theme';
 import './app.css';
@@ -8,6 +9,8 @@ import './app.css';
 applyAccent(DEFAULT_ACCENT);
 if (kioskRequested()) enableKiosk();
 
-const app = mount(App, { target: document.getElementById('app')! });
+const target = document.getElementById('app')!;
+fitToWindow(target);
+const app = mount(App, { target });
 
 export default app;
