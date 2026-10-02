@@ -33,7 +33,7 @@
       <Preview thumbnail={files.thumbnailFor(job.file)} />
       <div class="job-info">
         <p class="file" data-testid="job-file">{job.file ? (job.file.display ?? job.file.name) : t('job.none')}</p>
-        <div class="bar"><div class="fill" class:paused style:width="{job.completion ?? 0}%"></div></div>
+        <div class="bar"><div class="fill" class:paused style:transform="scaleX({(job.completion ?? 0) / 100})"></div></div>
         <dl class="times tabular">
           <div><dt>{t('job.elapsed')}</dt><dd>{formatDuration(job.progress?.printTime)}</dd></div>
           <div><dt>{t('job.left')}</dt><dd data-testid="job-left">{formatDuration(job.progress?.printTimeLeft)}</dd></div>
@@ -114,11 +114,12 @@
     background: var(--surface-3);
     overflow: hidden;
   }
+  /* scaleX instead of width: the compositor animates it, no layout at every frame. The bar clips the ends. */
   .fill {
     height: 100%;
-    border-radius: inherit;
     background: var(--accent);
-    transition: width 600ms var(--ease);
+    transform-origin: left;
+    transition: transform 600ms var(--ease);
   }
   .fill.paused {
     background: var(--paused);

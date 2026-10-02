@@ -15,7 +15,8 @@
   import { allHeatersOff, preheat } from './heaterTarget';
   import HeaterCard from './temperature/HeaterCard.svelte';
   import PresetManager from './temperature/PresetManager.svelte';
-  import TempChart from './temperature/TempChart.svelte';
+  // uPlot (~22 KB gzip) is only needed here: loaded with the screen, not at startup.
+  const chart = import('./temperature/TempChart.svelte');
 
   let managing = $state(false);
   const windows = $derived(CHART_WINDOWS.map((m) => ({ value: m, label: t('temps.minutes', { value: m }) })));
@@ -42,7 +43,11 @@
           testid="chart-window"
         />
       {/snippet}
-      <TempChart minutes={settings.value.temperature.chartMinutes} />
+      {#await chart}
+        <div class="chart-wait"></div>
+      {:then { default: TempChart }}
+        <TempChart minutes={settings.value.temperature.chartMinutes} />
+      {/await}
       <span class="legend" aria-hidden="true">
         {#each temperatures.heaters as heater (heater)}
           <span class="key" style:--key="var({heaterColorVar(heater)})">{t(`heater.${heater}`)}</span>
@@ -80,6 +85,9 @@
 {/if}
 
 <style>
+  .chart-wait {
+    flex: 1;
+  }
   .temperature {
     display: grid;
     grid-template-columns: 330px 1fr;

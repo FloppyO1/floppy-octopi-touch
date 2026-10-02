@@ -140,8 +140,8 @@
     bottom: 6px;
   }
   .switch :global(.btn) {
-    background: rgb(12 14 18 / 0.78);
-    backdrop-filter: blur(2px);
+    /* No backdrop blur: over the webcam it would be redrawn at every frame (costly on the Pi). */
+    background: rgb(12 14 18 / 0.85);
   }
   .large {
     height: 360px;

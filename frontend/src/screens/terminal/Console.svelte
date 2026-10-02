@@ -236,8 +236,8 @@
     min-height: var(--touch);
     padding: 0 var(--sp-2) 0 var(--sp-4);
     border-radius: var(--r-md);
-    background: var(--paused-soft);
-    backdrop-filter: blur(6px);
+    /* Opaque (the tint over the log background): no backdrop blur, costly on the Pi's GPU. */
+    background: linear-gradient(var(--paused-soft), var(--paused-soft)), var(--bg);
     color: var(--paused);
   }
   .log-wrap :global(.jump) {

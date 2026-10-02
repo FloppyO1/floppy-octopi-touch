@@ -85,7 +85,7 @@
               </p>
             </div>
           </div>
-          <div class="bar"><div class="fill" style:width="{job.completion ?? 0}%"></div></div>
+          <div class="bar"><div class="fill" style:transform="scaleX({(job.completion ?? 0) / 100})"></div></div>
           <p class="file">{job.file?.display ?? job.file?.name ?? ''}</p>
           <p class="times tabular">
             {t('job.left')} <b>{formatDuration(job.progress?.printTimeLeft)}</b>
@@ -205,11 +205,12 @@
     background: var(--surface-2);
     overflow: hidden;
   }
+  /* scaleX instead of width: the compositor animates it, no layout at every frame. The bar clips the ends. */
   .fill {
     height: 100%;
-    border-radius: inherit;
     background: var(--tone);
-    transition: width 600ms var(--ease);
+    transform-origin: left;
+    transition: transform 600ms var(--ease);
   }
   .file {
     max-width: 100%;
