@@ -53,6 +53,7 @@ function handleEvent({ type, payload }: EventPayload): void {
       prompt.reset();
       leveling.reset();
       printer.resetHoming();
+      temperatures.resetHeatup();
       tune.reset();
       printer.setPosition(null);
       void connection.refresh();
@@ -92,6 +93,8 @@ function handleCurrent(current: CurrentPayload, isHistory: boolean): void {
   // History lines are the recent past: good enough to know the fan/feed rate/flow after a reload.
   tune.ingest(current.logs);
   printer.ingestLog(current.logs);
+  // History too: after a reload in the middle of a heat-up the wait is still the last line sent.
+  temperatures.ingestLog(current.logs);
   leveling.ingest(current.logs, !isHistory);
   // Not from `history`: its lines may belong to an earlier job (a stale M486 P would hide a live object).
   if (!isHistory) objects.ingestLog(current.logs);

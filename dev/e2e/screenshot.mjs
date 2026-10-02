@@ -633,6 +633,7 @@ async function temperatureScreen(page) {
   await waitDisabled(page, 'off-tool0');
   await page.getByTestId('chart-window-15').click();
   log('temperature', 'target 190°C from the NumPad, reached, turned off');
+  if (DEV) await heatupOverride(page);
 
   await page.getByTestId('presets-manage').click();
   await page.getByTestId('preset-add').click();
@@ -673,6 +674,47 @@ async function temperatureScreen(page) {
   await waitDisabled(page, 'off-tool0');
   await waitDisabled(page, 'off-bed');
   log('preheat', 'PLA preset from the screen, then all heaters off');
+}
+
+// A target changed while the printer waits in M109. The wait is faked in the store (the Virtual Printer
+// heats at once and ignores M108): with EMERGENCY_PARSER the new wait + M108 go out, without it a warning.
+async function heatupOverride(page) {
+  const reloadWith = async (value) => {
+    await setOverrides(page, { emergencyParser: value });
+    await page.reload();
+    await waitDisabled(page, 'set-tool0', false);
+  };
+  const changeDuringWait = async (digits) => {
+    await page.getByTestId('set-tool0').click();
+    await page.waitForSelector('[data-testid=numpad]');
+    for (const d of digits) await page.getByTestId('numpad').getByRole('button', { name: d, exact: true }).click();
+    await page.evaluate(() => window.__fot.temperatures.ingestLog(['Send: N7 M109 S200*1']));
+    await page.getByTestId('numpad-ok').click();
+    await page.waitForSelector('[data-testid=numpad]', { state: 'detached' });
+  };
+  const sent = [];
+  const route = (r) => {
+    const commands = r.request().postDataJSON()?.commands ?? [];
+    if (!commands.includes('M108')) return r.continue();
+    sent.push(commands.join(','));
+    return r.fulfill({ status: 204 });
+  };
+  await reloadWith('on');
+  await page.route('**/api/printer/command', route);
+  await changeDuringWait('210');
+  await page.getByText('Applied at once', { exact: false }).waitFor();
+  if (sent.join('|') !== 'M109 S210,M108') throw new Error(`heat-up override sent: ${sent.join('|')}`);
+  await page.screenshot({ path: `${OUT}/heatup-override.png` });
+  await page.unroute('**/api/printer/command', route);
+
+  await reloadWith('off');
+  await changeDuringWait('180');
+  await page.getByText('the new target applies when it ends', { exact: false }).waitFor();
+  await waitText(page, 'heater-tool0', (t) => t.includes('Target 180'));
+  await page.getByTestId('off-tool0').click();
+  await waitDisabled(page, 'off-tool0');
+  await reloadWith('auto');
+  log('heat-up override', 'M109 S210 + M108 with EMERGENCY_PARSER, warning without');
 }
 
 // Move: home, jog with steps, soft limits from the profile (clamped moves, edge toast), motors off.

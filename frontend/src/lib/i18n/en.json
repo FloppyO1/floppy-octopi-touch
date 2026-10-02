@@ -119,6 +119,8 @@
   "temps.highMessage": "{value}°C for the {heater} is above the {limit}°C threshold. Continue?",
   "temps.highConfirm": "Set {value}°C",
   "temps.setFailed": "Could not set the temperature",
+  "temps.appliedNow": "Applied at once: the printer stopped waiting for the previous target",
+  "temps.afterWait": "The printer is waiting for the heat-up: the new target applies when it ends (the firmware has no EMERGENCY_PARSER)",
   "gauge.target": "Target {value}",
   "gauge.off": "Off",
   "gauge.fan": "Fan",

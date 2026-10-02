@@ -119,6 +119,8 @@
   "temps.highMessage": "{value}°C per {heater} supera la soglia di {limit}°C. Continuare?",
   "temps.highConfirm": "Imposta {value}°C",
   "temps.setFailed": "Impossibile impostare la temperatura",
+  "temps.appliedNow": "Applicata subito: la stampante non aspetta più il valore precedente",
+  "temps.afterWait": "La stampante sta aspettando il riscaldamento: il nuovo valore verrà applicato al termine (il firmware non ha EMERGENCY_PARSER)",
   "gauge.target": "Obiettivo {value}",
   "gauge.off": "Spento",
   "gauge.fan": "Ventola",

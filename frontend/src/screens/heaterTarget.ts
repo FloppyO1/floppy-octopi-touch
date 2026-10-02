@@ -1,12 +1,31 @@
 /**
  * Heater targets: tap on a gauge (NumPad with presets), preheat presets and cooldown, all with the
- * confirmation above the configured threshold.
+ * confirmation above the configured threshold. Every change goes through `applyTargets()`, which
+ * also handles a blocking heat-up wait (M109/M190) of a running print.
  */
 import type { TemperaturePreset } from '../lib/core/settings';
 import { t } from '../lib/i18n/index.svelte';
-import { printer, settings, temperatures, tune } from '../lib/stores';
+import { capabilities, printer, settings, temperatures, tune } from '../lib/stores';
 import { dialogs } from '../lib/ui/dialogs.svelte';
 import { toast } from '../lib/ui/toast.svelte';
+
+/**
+ * Sends `targets` (heater → °C). During a heat-up wait they apply at once with EMERGENCY_PARSER,
+ * otherwise only when the wait ends: the toast says which. `okMessage` is shown otherwise.
+ * Returns false (after an error toast) if OctoPrint refused them.
+ */
+export async function applyTargets(targets: Record<string, number>, okMessage?: string): Promise<boolean> {
+  try {
+    const delivery = await temperatures.setTargets(targets, capabilities.has('emergencyParser'));
+    if (delivery === 'interrupted') toast.show(t('temps.appliedNow'), { tone: 'ok', durationMs: 5000 });
+    else if (delivery === 'afterWait') toast.show(t('temps.afterWait'), { tone: 'warning', durationMs: 8000 });
+    else if (okMessage) toast.show(okMessage, { tone: 'ok' });
+    return true;
+  } catch {
+    toast.show(t('temps.setFailed'), { tone: 'error' });
+    return false;
+  }
+}
 
 export async function askHeaterTarget(heater: string): Promise<void> {
   const isBed = heater === 'bed';
@@ -25,11 +44,7 @@ export async function askHeaterTarget(heater: string): Promise<void> {
   });
   if (value === null) return;
   if (!(await confirmHigh(heater, value))) return;
-  try {
-    await temperatures.setTarget(heater, value);
-  } catch {
-    toast.show(t('temps.setFailed'), { tone: 'error' });
-  }
+  await applyTargets({ [heater]: value });
 }
 
 /** Asks for confirmation if `value` is above the configured threshold of `heater`. */
@@ -48,35 +63,20 @@ export async function confirmHigh(heater: string, value: number): Promise<boolea
 /** Heats hotend and bed to a preset (and sets its fan, if any). */
 export async function preheat(preset: TemperaturePreset): Promise<void> {
   if (!(await confirmHigh('tool0', preset.hotend)) || !(await confirmHigh('bed', preset.bed))) return;
-  try {
-    await Promise.all([
-      temperatures.setTarget('tool0', preset.hotend),
-      temperatures.setTarget('bed', preset.bed),
-      preset.fan === null ? undefined : tune.setFan(preset.fan),
-    ]);
-    toast.show(t('temps.preheating', { name: preset.name }), { tone: 'ok' });
-  } catch {
-    toast.show(t('temps.setFailed'), { tone: 'error' });
+  if (!(await applyTargets({ tool0: preset.hotend, bed: preset.bed }, t('temps.preheating', { name: preset.name })))) {
+    return;
   }
+  if (preset.fan !== null) await tune.setFan(preset.fan).catch(() => toast.show(t('temps.setFailed'), { tone: 'error' }));
 }
 
 export async function cooldown(): Promise<void> {
-  try {
-    await temperatures.allOff();
-    toast.show(t('temps.cooling'), { tone: 'ok' });
-  } catch {
-    toast.show(t('temps.setFailed'), { tone: 'error' });
-  }
+  await applyTargets(Object.fromEntries(temperatures.heaters.map((h) => [h, 0])), t('temps.cooling'));
 }
 
 /** Turns one heater off; during a job this ruins the print, so it asks first. */
 export async function heaterOff(heater: string): Promise<void> {
   if (printer.busy && !(await confirmOffWhilePrinting(t(`heater.${heater}`)))) return;
-  try {
-    await temperatures.setTarget(heater, 0);
-  } catch {
-    toast.show(t('temps.setFailed'), { tone: 'error' });
-  }
+  await applyTargets({ [heater]: 0 });
 }
 
 /** "All off" of the Temperature screen: like `cooldown()`, with the same guard as `heaterOff()`. */
