@@ -47,6 +47,7 @@ Package `agent/floppyoctotouch_agent`:
 | `objects.py` | printed objects of a G-code file for "cancel object": labels of the Cancel Objects plugin (`@Object` / `@Objectstop`, written when it rewrites an upload), slicer comments (`; printing object` / `; stop printing object`), `M486 S<n>` + `M486 A<name>`, Cura `;MESH:`, Klipper `EXCLUDE_OBJECT_*`; footprint = the outline shipped by the file (PrusaSlicer `; objects_info`, Klipper `POLYGON=`) or the convex hull of the extrusion moves (0.5 mm grid); `ObjectCache` on disk (`<data_dir>/objects/<sha1>.json`, key = path + size + mtime, 200 entries, 512 MiB scan limit) |
 | `usb.py` | `UsbManager`: mounts matching `usb_roots`, G-code listing (depth 5, 1000 files, system folders skipped), `resolve()` that confines every path to its mount (no `..`, no symlinks out), eject command; streamed multipart body with a known length for the import; `EventHub` + `UsbWatcher` (mount polling every 2 s) |
 | `files.py` | `FilesApi`: the thumbnail, USB and event endpoints, `ApiError` → JSON `{error, detail}` middleware |
+| `systime.py` | `TimeApi`: `/local/time`. Backend `timedatectl` (reads `timedatectl show` / `list-timezones` as the agent user over D-Bus, the zone list cached; changes only through `time_command` = `sudo -n deploy/time/time-set.sh timezone\|ntp\|set …`, after checking the zone against the list and the date format, `ntp_active` 409 before a manual time with NTP on), `fake` (development: zone, NTP and a clock offset kept in memory) or `none`; offset, DST and abbreviation from `zoneinfo` |
 | `settings.py` | `SettingsStore`: one JSON document (`<data_dir>/settings.json`), defaults when missing or corrupted, atomic writes, 256 KiB limit |
 | `app.py` | application factory and `/local/*` handlers |
 | `__main__.py` | CLI (`--host`, `--port`, `--listen-lan`) |
@@ -70,6 +71,8 @@ Package `agent/floppyoctotouch_agent`:
 | GET | `/local/apikey` | `{configured, hint: "…abcd", source: env|file|none, persistent}` (never the key) |
 | PUT | `/local/apikey` | `{"apiKey": "…"}`: 400 `invalid_format` (16-128 of `A-Za-z0-9_-`), 422 `rejected` (OctoPrint's `/api/version` did not answer 200 with it), 502 `octoprint_unreachable`, 500 `save_failed`; otherwise saved to `config_path`, used at once, answers like GET (`persistent: false` when `FOT_API_KEY` will win again at the next start) |
 | POST | `/local/kiosk/restart` | runs `kiosk_restart_command` → `{restarted: true}`, 503 `kiosk_restart_failed`; no command configured → `{restarted: false}` (the page reloads itself) |
+| GET | `/local/time[?zones=1]` | `{available, backend, canChange, timezone, utcOffsetMinutes, dst, abbreviation, now (ms), ntp, ntpAvailable, synchronized, timezones?}`; `{available: false, detail, now}` without `timedatectl` (or backend `none`) |
+| POST | `/local/time` | `{timezone?, ntp?, datetime?: "YYYY-MM-DD HH:MM[:SS]"}` applied in that order → the new state; 400 `invalid_timezone\|invalid_ntp\|invalid_datetime\|nothing_to_do` (nothing run), 403 `read_only` (no `time_command`), 409 `ntp_active`, 503 `command_failed` / `unavailable` |
 | GET | `/local/events` | Server-Sent Events: `usb` with the current mounts on connection and on every change, pings every 15 s; the kiosk page keeps it open, which is what the kiosk watchdog watches |
 | * | `/api/**`, `/sockjs/**`, `/plugin/**`, `/downloads/**` | proxied to OctoPrint |
 | GET | `/webcam/**` | proxied to the webcam streamer (`webcam_url`, default `http://127.0.0.1:8080`); 502 if unreachable |
@@ -314,6 +317,23 @@ the client never uses them and always builds relative paths.
   `settings.update()` (debounced save, no Save button). Firmware lists `CAPABILITY_KEYS` with the reported value and
   an auto/on/off `Segmented` override. The extruder setup reuses the Filament screen's dialog. Reset =
   `settings.reset()` (defaults saved at once).
+- **Date and time** (`settings/DateTimeSection.svelte`, `TimeZonePicker.svelte`, `core/timezone.ts`): the `clock`
+  store loads `/local/time` at start (with `?zones=1` when the section opens) and changes it with `POST`. Every
+  formatted wall-clock time (`core/format.ts`: status bar, screensaver, ETA, file dates, chart) passes the Pi's zone
+  as `timeZone` through a reactive getter (`useTimeZone()`), so a new zone shows at once whatever zone Chromium
+  started with, and a browser on another device shows the printer's time. Zones are split into region → city
+  (`groupZones`, search accent- and case-insensitive with the keyboard); the manual clock has five NumPad fields
+  (clamped like the agent, 2020-2099), is enabled only with NTP off and asks for confirmation; after it the idle
+  timer restarts (the wall clock jumped). The 24-hour switch moved here from General (same `clock24h` key).
+- **After Stop** (`core/stopScript.ts`, `stores/stopScript.svelte.ts`, Motion section, `shell/StopScriptNotice`):
+  `scripts.gcode.afterPrintCancelled` from `GET /api/settings` (only with SETTINGS_READ) is expanded
+  (`{% snippet %}` inlined from `snippets/*`, other Jinja tags dropped, so conditional lines count, comments
+  ignored) and checked for motors (`M84`/`M18` without `S`, all of X Y Z when axes are given), every hot end of the
+  profile (`M104 S0`; `T{{ tool }}` = all, no `T` = the active one; one with `sharedNozzle`), the bed when
+  `heatedBed` (`M140 S0`) and the fan (`M106 S0`/`M107`). "Fix" appends only the missing lines after a comment
+  (`fixStopScript`) and saves them with `POST /api/settings {scripts: {gcode: {afterPrintCancelled}}}` (SETTINGS
+  permission; on 403 or another failure the manual steps are shown). The notice comes once per start after
+  connecting, never while printing; "Don't ask again" = `stopScript.remind: false` (settings v9).
 - **API key** (`system/actions.ts` → `changeApiKey()`): in-app keyboard → `PUT /local/apikey` → toast → page
   reload (the socket logs in again). The connection overlay offers the same button for the `noApiKey` and
   `unauthorized` reasons and drops below the dialogs (`--z-overlay`) while one is open.
@@ -406,7 +426,8 @@ Runtime on the Pi:
 | `deploy/kiosk/kiosk.sh` | waits for `/local/health`, picks `chromium`/`chromium-browser`, fresh profile in `$XDG_RUNTIME_DIR` (tmpfs: no "restore session", no SD writes), `--kiosk --ozone-platform=wayland --disable-pinch --disable-session-crashed-bubble …` + `FOT_CHROMIUM_FLAGS`, opens `FOT_KIOSK_URL` (default `http://127.0.0.1:8765/?kiosk=1`) |
 | `99-floppyoctotouch-usb.rules` | USB block devices with a file system → `deploy/usb/usb-mount.sh add %k <user>`; removal → `remove %k` |
 | `deploy/usb/usb-mount.sh` | `systemd-mount --no-block --automount=no --collect` (PID 1 does the mount, udev never waits) on `/media/usb-<label>` (label sanitised to `[A-Za-z0-9._-]`, ≤ 32 chars, kernel name as fallback or suffix), `ro,nosuid,nodev,noexec,noatime`; vfat/exfat/ntfs (`ntfs3`) with `--owner=<user>,umask=0022`, ext2-4 as they are; partitions of the root disk skipped. `eject <mount point>` (through sudo) accepts only a mounted `/media/usb-*` backed by `/dev/sd*`, then `sync` + `systemd-mount --umount` |
-| `/etc/sudoers.d/floppyoctotouch` | the user may run, without password, only `systemctl restart floppyoctotouch-kiosk.service` and `usb-mount.sh eject /media/usb-*` |
+| `/etc/sudoers.d/floppyoctotouch` | the user may run, without password, only `systemctl restart floppyoctotouch-kiosk.service`, `usb-mount.sh eject /media/usb-*` and `time-set.sh timezone *`, `ntp on`, `ntp off`, `set *` |
+| `deploy/time/time-set.sh` | through sudo: `timezone <zone>` (name pattern + present in `timedatectl list-timezones`), `ntp on\|off` (`set-ntp`), `set "YYYY-MM-DD HH:MM[:SS]"` (pattern, `date -d`, refused while `NTP=yes`, then `set-time` and `fake-hwclock save` when installed, so the clock survives a reboot without network); logs with the tag `floppyoctotouch-time` |
 
 `deploy/update.sh` verifies the `.sha256`, extracts the tarball, compares versions (`sort -V`; same or older
 version only with a confirmation or `--force`) and runs the new `install.sh --update --user=<saved>` (no key
@@ -419,7 +440,7 @@ with `--purge` or a yes.
 systemd as PID 1) fakes an OctoPi (`pi` user, `octoprint.service`, boot files, a stand-in OctoPrint answering
 `/api/version`, `/api/job` and a Plugin Manager that only accepts the admin key) and checks install, config, units (`systemd-analyze verify`), sudo rules, groups, boot files,
 the agent running with the installed config, the 32-bit kernel warning (`kernel_memory_advice` with fake `uname -m`, MemTotal, boot and modules folders), the kiosk launcher with a fake Chromium, the USB helper with a fake
-`systemd-mount`, a second run (idempotence), update, uninstall, the install from a clone, self-elevation of
+`systemd-mount`, the date/time wrapper with a fake `timedatectl` (what reaches it, what is refused), a second run (idempotence), update, uninstall, the install from a clone, self-elevation of
 install/update/uninstall from `pi` (passwordless sudo like OctoPi, installer without its executable bit) and
 interactive runs on a fake terminal: `dev/deploy-test/drive.py` answers each question in order (regex + reply),
 fails on any question printed after "Installing packages", and can send Ctrl+C (key refused then accepted, empty
@@ -435,7 +456,7 @@ without admin rights, OctoPrint printing, `--no-cancel-plugin`, uninstall keepin
 | `octoprint-init` | `octoprint/octoprint:1.11.8` | one-shot: merges `dev/octoprint/config.yaml` into the image's config (first start only), copies `dev/sample-gcode` (plus `examples/` folder and a virtual SD file), creates the admin user, registers `OCTOPRINT_API_KEY` as an application key, installs the Cancel Objects plugin 0.6.4 (pinned, like the installer) |
 | `octoprint` | `octoprint/octoprint:1.11.8` | OctoPrint on port 5000 (haproxy on 80 is not used), Virtual Printer with SD, volume `octoprint-data` |
 | `webcam` | `octoprint/octoprint:1.11.8` (for its ffmpeg) | `dev/fake-webcam/server.py`: MJPEG test pattern on 8080 (`/?action=stream`, `/?action=snapshot`) |
-| `agent` | `dev/docker/agent.Dockerfile` (Python 3.11) | source mounted, hot reload with `watchfiles` (polling), `dev/fake-usb` mounted as `/media/usb0` (eject command `none`), OctoPrint's volume read-only for the thumbnails (`FOT_UPLOADS_DIR`), webcam → `http://webcam:8080`, display backend `none` |
+| `agent` | `dev/docker/agent.Dockerfile` (Python 3.11) | source mounted, hot reload with `watchfiles` (polling), `dev/fake-usb` mounted as `/media/usb0` (eject command `none`), time backend `fake` (date, time and zone kept in memory: no systemd in the container), OctoPrint's volume read-only for the thumbnails (`FOT_UPLOADS_DIR`), webcam → `http://webcam:8080`, display backend `none` |
 | `frontend` | `dev/docker/frontend.Dockerfile` (Node 24) | Vite dev server on 5173 proxying to the agent; `node_modules` in a named volume |
 | `agent-test`, `frontend-test`, `build`, `playwright`, `shellcheck` | profile `tools` | run on demand with `docker compose run --rm <service>` |
 | `release`, `deploy-test` | `dev/docker/release.Dockerfile`, `dev/docker/deploy-test.Dockerfile` (profile `tools`) | release tarball into `release/`; installer test on bookworm with `release/` and `dev/deploy-test` mounted read-only |

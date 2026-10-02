@@ -51,7 +51,17 @@ Available now:
   gateway), OctoPrint restart, Pi reboot/shutdown and custom system commands with confirmation, screen restart.
 - Power and lights: PSU Control switch (also in the status bar) and custom action buttons that send G-code, run
   an OctoPrint system command or call a plugin API, up to three of them in the status bar.
-- Settings on the screen: language, accent colour, clock, end-of-print beep, screensaver and screen off,
+- Date and time of the Pi (System → Settings → Date & time): time zone picked by region and city (daylight
+  saving time follows the zone), automatic time over the internet (NTP) on or off, a manual date and time for a
+  Pi without internet, 12/24-hour clock. The whole system changes (OctoPrint, logs, the dashboard), through
+  `timedatectl`; every time on the screen uses the Pi's zone at once. The Pi has no clock battery: a manual time
+  is saved for `fake-hwclock`, but without internet it can still drift or go back after a restart.
+- What happens after Stop: OctoPrint runs its "after print job is cancelled" G-code script at every Stop (also
+  from its web page). System → Settings → Motion shows whether it turns the motors, the hot end(s), the bed and
+  the part fan off, and **Fix** appends only the missing lines (`M104 T<n> S0`, `M140 S0`, `M106 S0`, `M84`) after
+  a preview, leaving the rest of the script alone. When something is missing the dashboard asks once after
+  connecting ("Don't ask again" is a setting). A key without the settings permission gets the manual steps.
+- Settings on the screen: language, accent colour, end-of-print beep, screensaver and screen off,
   temperature thresholds and limits, jog speeds, paper test, extruder, firmware capability overrides, webcam
   URL, OctoPrint API key (checked by the agent, also from the "connecting" overlay), reset.
 - Big end-of-print / failure / pause notices, with the `M300` beep through the printer's buzzer.
@@ -303,6 +313,12 @@ USB mounts: `journalctl -t floppyoctotouch-usb -b`. State: `systemctl status flo
   OctoPrint runs: `systemctl status octoprint`.
 - **USB stick not shown.** It must be FAT32, exFAT, NTFS or ext4 and not on the boot disk; see the
   `floppyoctotouch-usb` log and `findmnt /media/usb-*`. exFAT needs a kernel that supports it (Bookworm does).
+- **Wrong time or date.** `timedatectl` shows the zone, whether NTP is on and synchronised; changes made from
+  the dashboard are logged with `journalctl -t floppyoctotouch-time -b`. Without internet switch the automatic
+  time off in System → Settings → Date & time and set the clock by hand ("read only" there means the sudo rule
+  is missing: run the update again).
+- **Motors, heaters or fan stay on after Stop.** Check System → Settings → Motion → After Stop; the script is in
+  OctoPrint → Settings → GCODE Scripts → "After print job is cancelled".
 - **Screen off does not come back / wlr-randr errors.** The agent talks to the cage session through
   `WAYLAND_DISPLAY=wayland-0` in `/run/user/<uid>`; the screen-off option can be disabled in System → Settings.
 
@@ -318,7 +334,9 @@ USB mounts: `journalctl -t floppyoctotouch-usb -b`. State: `systemctl status flo
 6. installs the systemd units `floppyoctotouch-agent` and `floppyoctotouch-kiosk` (cage + Chromium on tty1,
    restarted if they stop) and disables the login prompt on tty1;
 7. installs a udev rule that mounts USB sticks **read-only** on `/media/usb-<label>` (FAT32, exFAT, NTFS, ext4),
-   a sudo rule limited to "eject a stick" and "restart the kiosk", and adds the user to `video`, `render`, `input`;
+   a sudo rule limited to "eject a stick", "restart the kiosk" and the date/time wrapper
+   (`deploy/time/time-set.sh`, which checks its arguments before calling `timedatectl`), and adds the user to
+   `video`, `render`, `input`;
 8. if accepted, installs the Cancel Objects plugin (a fixed, tested version) through OctoPrint's Plugin Manager API,
    like its own button, and restarts OctoPrint unless it is printing;
 9. only with `--display-config`: adds the screen maker's lines to `config.txt` and `video=HDMI-A-1:1024x600@60` to

@@ -6,6 +6,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-10-02
+
+### Added
+- System → Settings → **Date & time**: the Pi's time zone, chosen by region and city with a search (daylight
+  saving time follows the zone), automatic time over the internet (NTP) on or off, and a manual date and time
+  (enabled with NTP off, confirmed before it is applied) for a Pi without internet. The whole system changes,
+  through `timedatectl`. The 12/24-hour switch moved here from General.
+- Every time on the screen (status bar, screensaver, ETA, file dates, chart) uses the Pi's time zone, so a new
+  zone shows at once without restarting the kiosk.
+- Agent `GET`/`POST /local/time`; changes run only through `deploy/time/time-set.sh` (sudo), which checks its
+  arguments again before `timedatectl` and saves a manual time for `fake-hwclock`. Backend `fake` in development.
+- System → Settings → Motion → **After Stop**: whether OctoPrint's "after print job is cancelled" script turns the
+  motors, every hot end, the bed and the part fan off, and **Fix**, which appends only the missing lines after a
+  preview. A notice asks once after connecting when something is missing ("Don't ask again" is saved; settings
+  schema v9); without the settings permission the manual steps are shown.
+- Installer: sudo rule and config for the date/time wrapper; the installer test checks them and the wrapper
+  (now 150 checks).
+
+### Changed
+- Confirmation dialogs can show a single button (information messages).
+
 ## [0.11.0] - 2026-10-02
 
 ### Changed

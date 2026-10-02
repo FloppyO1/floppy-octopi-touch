@@ -71,6 +71,7 @@ agent/floppyoctotouch_agent/   config.py, proxy.py (OctoPrint + /webcam), displa
                                thumbnails.py (G-code thumbnails + disk cache), usb.py (sticks, import, watcher),
                                files.py (/local/thumbnail, /local/objects, /local/usb*, /local/events SSE),
                                objects.py (labelled objects of a G-code file + footprint, disk cache),
+                               systime.py (/local/time: timedatectl backend + sudo wrapper, fake backend in dev),
                                __main__.py; tests in agent/tests
 frontend/src/lib/api/          http.ts, octoprint.ts (typed REST), agent.ts (/local/*), socket.ts, types.ts
 frontend/src/lib/core/         pure logic + tests: capabilities (M115), hostActions, tempHistory, files,
@@ -83,16 +84,20 @@ frontend/src/lib/core/         pure logic + tests: capabilities (M115), hostActi
                                test points, G-code, G28/M84 detection), system (usage/heat tones, network
                                summary, system command order, HTML confirm → text), power (PSU state, custom
                                actions: validation, sanitising), objects (cancel method, object list, bed geometry),
-                               heatup (blocking M109/M190 waits from the log, M108 override commands)
+                               heatup (blocking M109/M190 waits from the log, M108 override commands), timezone
+                               (region/city split, search, offsets, manual clock fields), stopScript (afterPrintCancelled
+                               check: snippets expanded, missing lines, fix = append only)
 frontend/src/lib/stores/       *.svelte.ts singletons (connection, printer/job, temperatures, files, usb, terminal,
                                events, capabilities, prompt, server, settings, nav, clock, tune, notices, idle,
-                               leveling, system (polled only while watched), power (PSU Control), objects (cancel objects))
+                               leveling, system (polled only while watched), power (PSU Control), objects (cancel objects),
+                               stopScript; clock also holds /local/time and the Pi time zone used by core/format)
                                + dataLayer.ts (socket wiring)
 frontend/src/lib/i18n/         en.json, it.json, index.svelte.ts (t(), setLocale())
 frontend/src/lib/ui/           design system: tokens.css, components (Button, Card, Modal, NumPad, OnScreenKeyboard, Thumb,
                                RingGauge, SliderDialog, Segmented, WebcamView, …), dialogs.svelte.ts / toast.svelte.ts services,
                                press.ts, theme.ts, kiosk.ts, fit.ts (scales the app on screens other than 1024×600)
 frontend/src/shell/            Shell, Sidebar, StatusBar, ConnectionOverlay, PrinterOverlay, Screensaver, NoticeDialog,
+                               StopScriptNotice (once after connecting),
                                screens.ts (registry)
 frontend/src/screens/          Home + home/ (JobView, IdleView, Preview, StatusRows, ObjectsDialog, actions.ts), Files + files/
                                (view state, items, FileGrid, FileDetail, UsbDetail, ImportProgress, actions.ts),
@@ -101,7 +106,8 @@ frontend/src/screens/          Home + home/ (JobView, IdleView, Preview, StatusR
                                ManualPanel, FilamentSetup), Terminal + terminal/ (view state, Console, MacroGrid,
                                MacroManager/Editor, macroLook.ts, actions.ts), Leveling + leveling/ (view state,
                                PaperTest, MeshPanel, MeshMap heatmap, ZPanel, actions.ts), heaterTarget.ts,
-                               System + system/ (view state, Overview, SettingsPanel + settings/*Section, About,
+                               System + system/ (view state, Overview, SettingsPanel + settings/*Section incl. DateTime
+                               + TimeZonePicker, About,
                                ActionManager/Editor, actions.ts also used by the status bar and the connection
                                overlay); terminal/LookPicker (icon + colour, macros and actions); dev/Gallery +
                                dev/Debug (dev only)
@@ -116,7 +122,8 @@ dev/sample-gcode/              samples with PrusaSlicer PNG/QOI and OrcaSlicer t
 dev/fake-usb/                  mounted read-only in the agent as /media/usb0, writable in playwright (/fake-usb)
 dev/fake-webcam/server.py      MJPEG test pattern (ffmpeg testsrc) on :8080, service `webcam`
 deploy/                        install.sh, update.sh, uninstall.sh, lib/common.sh, systemd/*.service.in, pam/, udev/,
-                               sudoers/, kiosk/ (kiosk.sh + kiosk.env), usb/usb-mount.sh (udev + systemd-mount)
+                               sudoers/, kiosk/ (kiosk.sh + kiosk.env), usb/usb-mount.sh (udev + systemd-mount),
+                               time/time-set.sh (timezone / ntp / set through sudo, arguments checked again)
 scripts/build-release.sh       release tarball (service `release`) -> release/ (only the latest, committed)
 docs/github/release.yml        suggested GitHub Action (inactive until copied to .github/workflows/): draft release at a tag
 dev/deploy-test/               installer test on Debian bookworm (run.sh, fake_octoprint.py, drive.py = answers the
@@ -185,6 +192,18 @@ dev/deploy-test/               installer test on Debian bookworm (run.sh, fake_o
   changes (adding/removing a file = a new insertion event). Mount changes are polled every 2 s (no inotify).
 - The agent reads thumbnails straight from OctoPrint's uploads (`FOT_UPLOADS_DIR`, volume mounted `:ro`); the
   disk cache is keyed by path + size + mtime, so a re-uploaded file gets a fresh thumbnail.
+- Date and time: the dev agent uses `FOT_TIME_BACKEND=fake` (zone/NTP/clock offset in memory; the browser clock does
+  not move). `timedatectl` needs systemd as PID 1 even for `list-timezones` (systemd 252). **Never** run
+  `timedatectl set-time` (or `time-set.sh set`) in a privileged container: it moves the clock of Docker's VM for every
+  container (restore it from PowerShell: `docker exec <c> date -u -s "@$([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())"`);
+  in a systemd container `set-ntp true` stays `NTP=no` (timesyncd refuses containers). Test the wrapper with
+  `FOT_TIMEDATECTL=<fake script>`, unprivileged. The zone list also has old aliases (`America/Buenos_Aires`).
+- Wall-clock times on screen go through `core/format` (`formatClock`, `formatLongDate`, `formatFileDate`), which add
+  the Pi's zone (`useTimeZone`, set by the clock store): never format a time with a bare `Intl.DateTimeFormat`.
+- `GET /api/settings` returns `scripts.gcode` (templates, snippets as `snippets/<name>`) with SETTINGS_READ; saving
+  `afterPrintCancelled` needs SETTINGS. OctoPrint runs it on every `PrintCancelled` (any client), after `M108` when
+  the cancel hit a heat-up (`serial.abortHeatupOnCancel`). The smoke test puts the default script back at the end.
+- `dialogs.confirm({ cancelLabel: null })` is a single-button information dialog.
 
 - Virtual Printer and moves: it applies `G90`/`G91` at once but buffers `G0`/`G1`, and reads the relative flag only
   when its buffer thread runs the move: the `G90` that OctoPrint sends right after every jog sometimes turns that
@@ -249,9 +268,11 @@ dev/deploy-test/               installer test on Debian bookworm (run.sh, fake_o
 
 ## Current state
 
-v0.11.0 (session 11 closed formally: cancel objects — agent `/local/objects`, Home "Objects" dialog, M486 or the
-Cancel Objects plugin, installer question — already shipped in 0.10.0, no code changes). Next: session 12 (date,
-time and time zone of the Pi; motors/heaters/fan off after Stop via `afterPrintCancelled`), then the final session.
+v0.12.0 (session 12): System → Settings → Date & time (zone by region/city, NTP on/off, manual clock; agent
+`/local/time` through the `deploy/time/time-set.sh` sudo wrapper; every displayed time in the Pi's zone) and Motion →
+After Stop (check/fix of OctoPrint's `afterPrintCancelled`, notice once after connecting, settings v9). Next: the
+final session. v0.11.0 (session 11 closed formally: cancel objects — agent `/local/objects`, Home "Objects" dialog,
+M486 or the Cancel Objects plugin, installer question — already shipped in 0.10.0).
 v0.10.0 (session 10, fixes from the Pi and polish): a heater target changed during a blocking heat-up applies at
 once with EMERGENCY_PARSER (new wait + M108), filament wizard with Change (unload + load), cancel turning the hotend
 off, "cool down at the end" (settings v8) and an `M118` end marker; installer without the display question (lines

@@ -667,7 +667,11 @@ Leggi docs/PLAN.md e CLAUDE.md. Esegui la Sessione finale (io ho il Raspberry da
     (grafico caricato a richiesta);
   - data e ora (Sessione 12): cambio del fuso, ora manuale senza rete e cosa resta dopo un riavvio, ritorno all'ora
     automatica; Stop di una stampa vera: script `afterPrintCancelled` del Pi prima della correzione (perché i motori
-    restavano accesi), poi motori liberi, riscaldatori e ventola spenti dopo lo Stop.
+    restavano accesi), poi motori liberi, riscaldatori e ventola spenti dopo lo Stop. In più: `timedatectl show` e
+    `list-timezones` dall'agent (utente normale, D-Bus), `systemd-timesyncd` attivo (`CanNTP=yes`), `fake-hwclock`
+    installato (`/etc/fake-hwclock.data` aggiornato dopo l'ora manuale), regola sudo (`sudo -n -l …/time-set.sh`),
+    orologio della status bar subito giusto dopo il cambio di fuso, nessuno screensaver immediato dopo un salto in
+    avanti dell'ora; `M84` durante lo svuotamento della coda (Marlin aspetta i movimenti e poi spegne i motori).
 - Correggere i bug trovati (se sono tanti, spezzare la sessione in parti con stop fra l'una e l'altra).
 - README finale con screenshot reali (controllare che non mostrino IP, SSID o altri dati), CHANGELOG.
 - Chiusura sessione (sezione 3) con versione 1.0.0 e tag v1.0.0 locale, poi FERMATI.
@@ -717,7 +721,7 @@ _Legenda: `[ ]` da fare · `[~]` in corso (interrotta se la trovi a inizio sessi
 - [x] Sessione 9b — Installazione in un solo comando (2026-09-27, v0.9.1)
 - [x] Sessione 10 — Correzioni dal Pi e rifinitura (iniziata 2026-09-27, ripresa e chiusa il 2026-10-02, v0.10.0; i test sul Pi sono nella Sessione finale)
 - [x] Sessione 11 — Rimozione di oggetti dalla stampa in corso (iniziata 2026-09-27 sul branch `session-11`, poi su `main`; chiusa il 2026-10-02, v0.11.0; il codice è già nella v0.10.0, la verifica sul Pi è nella Sessione finale)
-- [ ] Sessione 12 — Data, ora e fuso orario; cosa succede dopo lo Stop, v0.12.0 (aggiunta il 2026-10-02)
+- [x] Sessione 12 — Data, ora e fuso orario; cosa succede dopo lo Stop (aggiunta e chiusa il 2026-10-02, v0.12.0; le prove sul Pi sono nella Sessione finale)
 - [ ] Sessione finale — Test sul Raspberry reale e rilascio 1.0.0 (resta sempre l'ultima riga: le nuove sessioni si aggiungono sopra)
 
 ### Note tra sessioni
@@ -1466,3 +1470,43 @@ _(ogni sessione aggiunge qui decisioni prese, deviazioni dal piano, problemi ape
 - Il branch locale `session-11` è già tutto contenuto in `main`: si può cancellare (`git branch -d session-11`).
 - Resta per la Sessione finale: rimozione di un oggetto in una stampa vera di 3-4 oggetti piccoli (file caricato
   **dopo** l'installazione del plugin).
+
+**Sessione 12 — Data, ora e fuso orario; cosa succede dopo lo Stop (2026-10-02, v0.12.0)**
+- Avviata nella stessa conversazione della chiusura della 11, su richiesta esplicita dell'utente.
+- Verifiche (container Debian bookworm, systemd 252, e OctoPrint 1.11.8 del dev):
+  - `timedatectl show` → `Timezone`, `LocalRTC`, `CanNTP`, `NTP`, `NTPSynchronized`, `TimeUSec`; `list-timezones`
+    (598 fusi, con gli alias storici) passa da D-Bus, quindi serve systemd come PID 1; `set-timezone` rifiuta i fusi
+    sconosciuti (rc 1) e cambia il symlink `/etc/localtime` (`/etc/timezone` resta vecchio); `set-ntp false` va,
+    `set-time` funziona solo con NTP spento. `fake-hwclock`: `save` scrive sempre (il `force` serve solo prima del
+    2016), al boot `load` rimette l'ora salvata se è più avanti dell'orologio.
+  - **Deciso**: niente riavvio del kiosk per il fuso. L'app formatta ogni ora con `timeZone` = fuso del Pi
+    (`Intl.DateTimeFormat`), quindi il cambio si vede subito anche se Chromium non seguisse `/etc/localtime`.
+    Niente correzione dello scarto fra orologio dell'agent e del browser (lo screensaver confronta `clock.now`
+    con `Date.now()`): dopo un'ora manuale si azzera solo il timer di inattività.
+  - OctoPrint: `GET /api/settings` dà `scripts.gcode.afterPrintCancelled` e `snippets/*` con SETTINGS_READ,
+    `POST /api/settings {scripts: {gcode: {…}}}` salva con SETTINGS (provato: 200 con la key admin). Lo script gira
+    in `on_comm_print_job_cancelled` a ogni `PrintCancelled`, quindi anche per gli Stop dalla pagina web. Prova con
+    la Virtual Printer: script di default → `M84`, `M104 T0 S0`, `M140 S0`, `M106 S0` subito dopo `M108`; script
+    senza `M84` e piatto → solo `M104 T0 S0` e `M106 S0` (piatto rimasto a 80 °C). Uno Stop durante l'`M109`
+    resta in "Cancelling" finché l'attesa non finisce (la Virtual Printer ignora `M108`).
+- Fatto: agent `systime.py` (`GET /local/time[?zones=1]`, `POST /local/time` con fuso → NTP → ora, backend
+  `timedatectl` / `fake` / `none`, `time_backend` e `time_command` nella config), 16 pytest; wrapper
+  `deploy/time/time-set.sh` (fuso dall'elenco, `ntp on|off`, `set` con formato fisso, rifiuto con NTP attivo,
+  `fake-hwclock save`), una riga sudoers con i soli quattro comandi, config scritta dall'installer; deploy-test
+  con un `timedatectl` finto (18 controlli nuovi). Frontend: `core/timezone.ts` e `core/stopScript.ts` (+ test),
+  orologio e fuso nel `clock` store, `core/format` con il fuso del Pi, sezione **Data e ora** (riga del fuso con
+  offset e ora legale/solare, selettore regione → città con ricerca, ora automatica, cinque campi NumPad con
+  conferma, formato 24h spostato qui), riga **Dopo lo Stop** in Movimento (stato, Correggi con anteprima, passi
+  manuali su 403/errore, interruttore dell'avviso), avviso una volta dopo la connessione (`StopScriptNotice`,
+  "Non chiedere più" = `stopScript.remind`, impostazioni **v9**), `dialogs.confirm({cancelLabel: null})` per i
+  messaggi con un solo pulsante. Smoke test: passi `datetime` e `stopscript` (script rimesso di default alla fine);
+  `targets.mjs` controlla anche Data e ora e Movimento.
+- Errori di processo (da non ripetere, annotati in CLAUDE.md): due `set-time` veri in un container systemd
+  privilegiato hanno spostato l'orologio della VM di Docker (rimesso subito dall'ora di Windows); in quel container
+  `set-ntp true` resta `NTP=no`, quindi il rifiuto atteso non c'era. Due comandi `python` lanciati per sbaglio sul
+  PC host (uno solo per formattare JSON, uno rimasto in attesa e fermato): niente tool sul host.
+- Test: 114 pytest + ruff, 176 vitest + svelte-check + tsc, shellcheck pulito, smoke test **completo** verde su Vite
+  (con i passi nuovi `datetime` e `stopscript`), `targets.mjs`: 0 target sotto 56 px (anche Data e ora e
+  Movimento), deploy-test **150/150**. Bundle main 137,4 KB gzip (era 129,4).
+- Da provare sul Pi: elenco aggiornato nella Sessione finale (fuso, ora manuale e riavvio senza rete, ritorno
+  all'ora automatica, `fake-hwclock`, regola sudo, script del Pi prima della correzione e Stop vero con la stampante).
