@@ -1,0 +1,50 @@
+# Suggested GitHub Action: builds the release at every version tag (v1.2.3) and attaches it to a DRAFT GitHub
+# release, which stays invisible until it is published by hand on GitHub. Nothing runs while this file is here:
+# to enable it, copy it to .github/workflows/release.yml and push it.
+#
+# It uses the same Docker services as the PC (dev/docker-compose.yml): tests, release tarball, installer test.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write # create the draft release
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: The tag matches the versions
+        run: |
+          version=${GITHUB_REF_NAME#v}
+          grep -q "^  \"version\": \"$version\",$" frontend/package.json || { echo "frontend/package.json is not $version"; exit 1; }
+          grep -q "^version = \"$version\"$" agent/pyproject.toml || { echo "agent/pyproject.toml is not $version"; exit 1; }
+          grep -q "^## \[$version\]" CHANGELOG.md || { echo "no CHANGELOG entry for $version"; exit 1; }
+
+      - name: Tests (agent, web app, shell scripts)
+        run: |
+          docker compose -f dev/docker-compose.yml run --rm agent-test
+          docker compose -f dev/docker-compose.yml run --rm frontend-test
+          docker compose -f dev/docker-compose.yml run --rm shellcheck
+
+      - name: Release tarball
+        # The commit time as file timestamps: the same commit gives the same tarball.
+        run: |
+          SOURCE_DATE_EPOCH=$(git log -1 --format=%ct) \
+            docker compose -f dev/docker-compose.yml run --rm -e SOURCE_DATE_EPOCH release
+
+      - name: Installer test (Debian bookworm, like OctoPi)
+        run: docker compose -f dev/docker-compose.yml run --rm deploy-test
+
+      - name: Draft release with the tarball and the CHANGELOG entry
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=${GITHUB_REF_NAME#v}
+          awk -v v="$version" 'index($0, "## [" v "]") == 1 { on = 1; next } /^## \[/ { on = 0 } on' CHANGELOG.md >notes.md
+          gh release create "$GITHUB_REF_NAME" --draft --verify-tag --title "FloppyOctoTouch $version" \
+            --notes-file notes.md "release/floppyoctotouch-$version.tar.gz" "release/floppyoctotouch-$version.tar.gz.sha256"
