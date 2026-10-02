@@ -2,7 +2,7 @@
 # FloppyOctoTouch installer for OctoPi 1.1.0 (Raspberry Pi OS Bookworm Lite, arm64 or armhf).
 #
 # Run it from a clone or an extracted release: ./deploy/install.sh (it runs itself through sudo if needed).
-# Every question comes first (API key, Cancel Objects plugin, display, reboot), then it works on its own.
+# Every question comes first (API key, Cancel Objects plugin, reboot), then it works on its own.
 # It is idempotent: running it again repairs or reconfigures an installation. See README "Installation".
 set -euo pipefail
 
@@ -19,17 +19,19 @@ Installs the FloppyOctoTouch dashboard: agent service, cage + Chromium kiosk on 
 Needs root: without it the installer runs itself again with sudo.
 
 Options:
-  --non-interactive      never ask: use the detected/default answers (display settings included,
-                         unless --skip-display-config)
+  --non-interactive      never ask: use the detected/default answers
   --api-key=KEY          OctoPrint API key (checked against OctoPrint); without it the saved key is kept,
                          or it can be entered later on the touch screen
   --user=NAME            user that runs the dashboard (default: the user of octoprint.service)
   --octoprint-url=URL    OctoPrint address (default: http://127.0.0.1:<port of octoprint.service>)
-  --skip-display-config  do not touch config.txt / cmdline.txt
+  --display-config       add the display manufacturer's lines to config.txt and video= to cmdline.txt (only
+                         for the legacy firmware display stack: with KMS, OctoPi's default, they do nothing;
+                         the kiosk sets the 1024x600 mode itself)
+  --skip-display-config  do not touch config.txt / cmdline.txt (the default; kept for old scripts)
   --listen-lan           let the agent listen on every network interface. WARNING: it adds the API key to
                          every request, so anyone on the network gets full control of the printer
   --no-cancel-plugin     do not offer the Cancel Objects OctoPrint plugin (cancel single objects)
-  --update               used by update.sh: keep the configuration, no questions about key and display
+  --update               used by update.sh: keep the configuration, no questions about the key
   -h, --help             show this help
 EOF
 }
@@ -38,7 +40,7 @@ API_KEY=''
 API_KEY_GIVEN=0
 USER_ARG=''
 OCTOPRINT_URL=''
-SKIP_DISPLAY=0
+DISPLAY_CONFIG=0
 LISTEN_LAN=0
 NO_CANCEL_PLUGIN=0
 UPDATE=0
@@ -54,13 +56,11 @@ parse_args() {
         ;;
       --user=*) USER_ARG=${arg#*=} ;;
       --octoprint-url=*) OCTOPRINT_URL=${arg#*=} ;;
-      --skip-display-config) SKIP_DISPLAY=1 ;;
+      --display-config) DISPLAY_CONFIG=1 ;;
+      --skip-display-config) DISPLAY_CONFIG=0 ;;
       --listen-lan) LISTEN_LAN=1 ;;
       --no-cancel-plugin) NO_CANCEL_PLUGIN=1 ;;
-      --update)
-        UPDATE=1
-        SKIP_DISPLAY=1
-        ;;
+      --update) UPDATE=1 ;;
       -h | --help)
         usage
         exit 0
@@ -122,8 +122,21 @@ check_system() {
     model=$(tr -d '\0' </proc/device-tree/model)
     info "board: $model"
   fi
+  check_kernel_memory
   command -v python3 >/dev/null || die "python3 is missing (OctoPi ships it)"
   command -v systemctl >/dev/null || die "systemd is required"
+}
+
+KERNEL_WARNED=0
+
+# Only a warning (repeated in the summary): the kernel is never switched automatically.
+check_kernel_memory() {
+  local mem_kb boot
+  mem_kb=$(awk '/^MemTotal:/ { print $2 }' /proc/meminfo 2>/dev/null || true)
+  boot=$(boot_dir || printf '/boot/firmware')
+  if kernel_memory_advice "$(uname -m)" "${mem_kb:-0}" "$boot" /lib/modules; then
+    KERNEL_WARNED=1
+  fi
 }
 
 OCTOPRINT_UNIT_TEXT=''
@@ -305,6 +318,7 @@ install_packages() {
   fi
   if [ ${#missing[@]} -gt 0 ]; then
     info "installing: ${missing[*]}"
+    info "(Chromium alone is over 100 MB: this can take several minutes, apt shows no progress bar)"
     DEBIAN_FRONTEND=noninteractive apt-get install -y -q "${missing[@]}"
   fi
   ok "packages: cage, $chromium, python3-venv, wlr-randr, fonts-dejavu-core, curl"
@@ -747,10 +761,12 @@ BOOT_CMDLINE=''
 HAS_BLOCK=0
 HAS_TOKEN=0
 
-# Asked before anything is installed; configure_display() applies the answer later.
+# Only with --display-config. On the real Pi (KMS) neither the manufacturer's hdmi_* lines nor video= give the
+# 1024x600 mode (the screen does not list it in its EDID): kiosk.sh sets it with wlr-randr instead.
+# configure_display() applies the plan later.
 plan_display() {
   local dir
-  [ "$SKIP_DISPLAY" = 0 ] || return 0
+  [ "$DISPLAY_CONFIG" = 1 ] || return 0
   if ! dir=$(boot_dir); then
     warn "config.txt not found in /boot/firmware or /boot: display settings skipped"
     return
@@ -765,13 +781,9 @@ plan_display() {
     ok "display settings already in $BOOT_CONFIG"
     return
   fi
-  info "The 7\" HDMI Display (H) needs its 1024x600 mode in $BOOT_CONFIG (manufacturer's lines) and"
-  info "'video=$DISPLAY_OUTPUT:1024x600@60' in $BOOT_CMDLINE. Backups are kept; uninstalling removes the lines."
-  if ask_yes_no "Add the display settings?" y; then
-    DISPLAY_WANTED=1
-  else
-    info "display settings skipped"
-  fi
+  info "--display-config: the manufacturer's lines go to $BOOT_CONFIG and 'video=$DISPLAY_OUTPUT:1024x600@60'"
+  info "to $BOOT_CMDLINE (backups are kept; uninstalling removes them)."
+  DISPLAY_WANTED=1
 }
 
 REBOOT_WANTED=0
@@ -902,6 +914,9 @@ summary() {
   info "logs:           journalctl -u $AGENT_UNIT -u $KIOSK_UNIT -b"
   info "update:         git pull in the clone, then ./deploy/install.sh (or floppyoctotouch-update X.tar.gz)"
   info "uninstall:      floppyoctotouch-uninstall"
+  if [ "$KERNEL_WARNED" = 1 ]; then
+    warn "32-bit kernel on a Pi with more than 3 GB of RAM: see the warning at the start (arm_64bit=1)"
+  fi
 }
 
 # Run from a git clone: the web app is not built there, but release/ holds the latest release tarball.

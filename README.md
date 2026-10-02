@@ -218,12 +218,11 @@ the Tatara A8 profile (240 layers, about 45 min, 300×300 PNG thumbnail), handy 
    - **the API key**: paste it (in most SSH terminals: right click or Ctrl+Shift+V) and press Enter. Nothing
      shows while you paste, that is normal. If OctoPrint refuses it, the installer asks again. Pressing Enter
      without a key is fine too: the touch screen asks for it later;
-   - **"Install the Cancel Objects plugin?"** (it lets the dashboard remove single objects from a print),
-     **"Add the display settings?"** and **"Reboot automatically at the end?"**: press Enter.
+   - **"Install the Cancel Objects plugin?"** (it lets the dashboard remove single objects from a print) and
+     **"Reboot automatically at the end?"** (not needed): press Enter.
 
-   Then it works on its own for a few minutes (it downloads Chromium), shows a summary and reboots after a
-   10-second countdown (Ctrl+C cancels the reboot and starts the dashboard right away). After the reboot the
-   dashboard appears on the screen.
+   Then it works on its own for a few minutes (it downloads Chromium), shows a summary and starts the dashboard
+   on the screen. If you asked for the reboot, it reboots after a 10-second countdown instead (Ctrl+C cancels it).
 
 ### Install without git
 
@@ -246,10 +245,11 @@ reconfigures the installation and keeps a saved API key that OctoPrint still acc
 | Option | Effect |
 |---|---|
 | `--api-key=KEY` | use this key instead of asking (checked against OctoPrint; the installation stops if it is refused) |
-| `--non-interactive` | never ask: detected or default answers (the display settings are added unless `--skip-display-config`, no automatic reboot) |
+| `--non-interactive` | never ask: detected or default answers (no automatic reboot) |
 | `--user=NAME` | dashboard user instead of the one of `octoprint.service` |
 | `--octoprint-url=URL` | OctoPrint address (default `http://127.0.0.1:<port>`) |
-| `--skip-display-config` | do not touch `config.txt` / `cmdline.txt` |
+| `--display-config` | add the screen maker's lines to `config.txt` and `video=HDMI-A-1:1024x600@60` to `cmdline.txt` (with backups). Only useful with the legacy firmware display stack: with KMS (OctoPi's default) they change nothing, the kiosk sets the 1024×600 mode itself |
+| `--skip-display-config` | do not touch `config.txt` / `cmdline.txt` (the default now; still accepted) |
 | `--listen-lan` | agent on every interface instead of `127.0.0.1`. **Anyone on the network then controls the printer** (the agent adds the API key to every request) |
 | `--no-cancel-plugin` | do not offer the Cancel Objects OctoPrint plugin (`--non-interactive` installs it otherwise) |
 
@@ -264,7 +264,7 @@ floppyoctotouch-uninstall                                   # --purge also delet
 Updates keep the API key, the dashboard settings and the kiosk options, and do not touch the display settings;
 `floppyoctotouch-update` refuses a damaged tarball and asks before reinstalling the same version or going back
 (`--force` skips the questions). Uninstalling removes the dashboard services and files, gives tty1 back to the
-login prompt and removes the display lines it added (with a backup); the installed packages stay. Updates never
+login prompt and removes the display lines added by `--display-config` (with a backup); the installed packages stay. Updates never
 touch OctoPrint's plugins; uninstalling offers to remove the Cancel Objects plugin only if the installer added it
 (`--non-interactive` keeps it).
 
@@ -277,10 +277,18 @@ USB mounts: `journalctl -t floppyoctotouch-usb -b`. State: `systemctl status flo
 - **Black screen after boot.** The kiosk waits for the agent: check `systemctl status floppyoctotouch-agent`.
   If the agent runs, look at the kiosk log (cage needs the logind session on tty1: `loginctl` should list a
   session of the dashboard user on `seat0`/`tty1`). With a USB keyboard, **Ctrl+Alt+F2** opens another console.
-- **Wrong resolution or no picture.** Rerun the installer and accept the display settings, or check the block
-  between `# >>> FloppyOctoTouch display >>>` markers in `/boot/firmware/config.txt` and
-  `video=HDMI-A-1:1024x600@60` in `cmdline.txt`, then reboot. `ls /sys/class/drm` shows the connector name
+- **Wrong resolution or no picture.** The kiosk sets the 1024×600 mode with `wlr-randr` at every start (the
+  screen does not announce it, so with KMS `config.txt` and `cmdline.txt` cannot set it). Pick another mode in
+  System → Settings → Screen (it goes back by itself after 15 s unless confirmed), or force one with
+  `FOT_DISPLAY_MODE` in `/etc/floppyoctotouch/kiosk.env`. `ls /sys/class/drm` shows the connector name
   (`card?-HDMI-A-1` or `-HDMI-A-2` for the second port).
+- **Chromium's "Something went wrong" page after hours on, or the installer warns about a 32-bit kernel.**
+  OctoPi runs a 32-bit kernel (`arm_64bit=0` in `/boot/firmware/config.txt`, `uname -m` says `armv7l`): on a
+  Pi 4 with more than 3 GB it keeps only ~768 MB for itself and can kill Chromium with gigabytes free (the
+  dashboard restarts the kiosk by itself after a minute). The 64-bit kernel avoids it and the programs stay as
+  they are: check that `/boot/firmware/kernel8.img` and a `/lib/modules/*-v8` folder exist, change the line to
+  `arm_64bit=1`, `sudo reboot`; `uname -m` then says `aarch64` (set `arm_64bit=0` again to go back).
+  `journalctl -k | grep -i oom` shows whether the OOM killer was the cause.
 - **Touch does not respond.** The touch panel is a USB device: plug its cable in (the kiosk also starts without
   it) and restart the kiosk, `sudo systemctl restart floppyoctotouch-kiosk`. `ls /dev/input/by-id` should list
   it; the user must be in the `input` group (`id <user>`; rerun the installer to fix it).
@@ -296,7 +304,8 @@ USB mounts: `journalctl -t floppyoctotouch-usb -b`. State: `systemctl status flo
 
 1. checks the system (Bookworm, arm64/armhf) and that OctoPrint answers on `127.0.0.1` (port taken from
    `octoprint.service`); the dashboard runs as the user of `octoprint.service` (normally `pi`);
-2. asks its questions (API key, checked on `/api/version`; Cancel Objects plugin; display settings; reboot);
+2. asks its questions (API key, checked on `/api/version`; Cancel Objects plugin; reboot) and warns about a
+   32-bit kernel on a Pi with more than 3 GB of RAM;
 3. installs `cage`, `chromium` (or `chromium-browser`), `python3-venv`, `wlr-randr`, `fonts-dejavu-core`, `curl`;
 4. copies the app to `/opt/floppyoctotouch` and creates the agent's virtual environment there;
 5. writes `~/.config/floppyoctotouch/config.json` with mode 600;
@@ -306,7 +315,7 @@ USB mounts: `journalctl -t floppyoctotouch-usb -b`. State: `systemctl status flo
    a sudo rule limited to "eject a stick" and "restart the kiosk", and adds the user to `video`, `render`, `input`;
 8. if accepted, installs the Cancel Objects plugin (a fixed, tested version) through OctoPrint's Plugin Manager API,
    like its own button, and restarts OctoPrint unless it is printing;
-9. if accepted, adds the display's 1024×600 mode to `config.txt` and `video=HDMI-A-1:1024x600@60` to
+9. only with `--display-config`: adds the screen maker's lines to `config.txt` and `video=HDMI-A-1:1024x600@60` to
    `cmdline.txt` (in `/boot/firmware`, with backups);
 10. starts the agent, prints a summary and reboots (or starts the kiosk).
 

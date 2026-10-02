@@ -147,6 +147,27 @@ boot_dir() {
   return 1
 }
 
+# kernel_memory_advice MACHINE MEMTOTAL_KB BOOT_DIR MODULES_DIR: warns (and returns 0) when a 32-bit kernel runs
+# on more than 3 GB of RAM, as OctoPi does on a Pi 4 with 8 GB (arm_64bit=0). That kernel keeps only ~768 MB of
+# low memory for itself, so its OOM killer can stop Chromium with gigabytes free. Returns 1 otherwise.
+kernel_memory_advice() {
+  local machine=$1 mem_kb=$2 boot=$3 modules=$4
+  case $machine in
+    armv6* | armv7*) ;;
+    *) return 1 ;;
+  esac
+  [ "$mem_kb" -gt 3145728 ] || return 1
+  warn "32-bit kernel ($machine) with $(((mem_kb + 524288) / 1048576)) GB of RAM: it keeps only ~768 MB for itself"
+  info "and can stop Chromium for lack of memory with gigabytes free (the kiosk then restarts on its own)."
+  if [ -f "$boot/kernel8.img" ] && compgen -G "$modules/*-v8*" >/dev/null; then
+    info "Recommended: the 64-bit kernel (already installed; programs stay as they are). After the installation"
+    info "set arm_64bit=1 in $boot/config.txt (OctoPi has arm_64bit=0 there) and reboot: 'uname -m' says aarch64."
+  else
+    info "The 64-bit kernel (kernel8.img and its -v8 modules) is not installed: see the README, Troubleshooting."
+  fi
+  return 0
+}
+
 backup_file() {
   local backup
   backup="$1.floppyoctotouch-$(date +%Y%m%d-%H%M%S).bak"

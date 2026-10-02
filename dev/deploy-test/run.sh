@@ -108,8 +108,8 @@ chmod 755 /opt/octopi/oprint/bin/python
 python3 /test/fake_octoprint.py "$KEY" 5001 "$USER_KEY" &
 check "fake OctoPrint on :5001" wait_url "http://127.0.0.1:5001/robots.txt"
 
-section "install.sh --non-interactive --api-key=…"
-bash "$src/deploy/install.sh" --non-interactive --api-key="$KEY"
+section "install.sh --non-interactive --api-key=… --display-config"
+bash "$src/deploy/install.sh" --non-interactive --api-key="$KEY" --display-config
 
 check "install.sh is executable in the tarball" bash -c \
   "tar -tvzf $tarball | grep -Eq '^-rwxr-xr-x .* floppyoctotouch-$version/deploy/install.sh$'"
@@ -325,14 +325,14 @@ rm -f $PLUGIN
 status=0
 drive --transcript /tmp/drive1.log --interrupt-on "Ctrl+C to cancel" --answers "$(printf '%s' \
   '[["API key", "not a key"], ["API key", "wrong-key-0123456789abcdef"], ["API key", " '"$KEY"' "],' \
-  ' ["Cancel Objects plugin", ""], ["display settings", ""], ["Reboot automatically", ""]]')" \
+  ' ["Cancel Objects plugin", ""], ["Reboot automatically", "y"]]')" \
   -- bash "$src/deploy/install.sh" || status=$?
 check_eq "installer finished, questions only at the start, user not asked" 0 "$status"
 check "shows where to create the key" grep -q "Settings (wrench icon at the top) > Application Keys" /tmp/drive1.log
 check "bad format asked again" grep -q "does not look like an API key" /tmp/drive1.log
 check "refused key asked again" grep -q "OctoPrint rejected that key" /tmp/drive1.log
 check_eq "accepted key saved (spaces removed)" "$KEY" "$(config_value api_key)"
-check_eq "display settings added (Enter = yes)" 1 "$(count '# >>> FloppyOctoTouch display >>>' $BOOT/config.txt)"
+check "no display question, config.txt untouched" cmp /tmp/config.txt.orig $BOOT/config.txt
 check "reboot countdown cancelled with Ctrl+C" grep -q "reboot cancelled: starting the dashboard now" /tmp/drive1.log
 check "Cancel Objects installed (Enter = yes)" grep -q "Cancel Objects 0.6.4 installed" /tmp/drive1.log
 check "no OctoPrint restart without systemd" grep -q "loads at the next OctoPrint start" /tmp/drive1.log
@@ -349,7 +349,7 @@ check "countdown ran out (no systemd here, so no reboot)" \
 section "interactive uninstall: removes the Cancel Objects plugin the installer added"
 status=0
 python3 /test/drive.py --transcript /tmp/drive-uninstall.log --answers "$(printf '%s' \
-  '[["Continue", "y"], ["display settings", "y"], ["Cancel Objects", "y"], ["delete the configuration", "y"]]')" \
+  '[["Continue", "y"], ["Cancel Objects", "y"], ["delete the configuration", "y"]]')" \
   -- floppyoctotouch-uninstall || status=$?
 check_eq "uninstall finished, questions as expected" 0 "$status"
 check "plugin removed through the Plugin Manager" test ! -e $PLUGIN
@@ -358,12 +358,13 @@ check "configuration deleted on request" test ! -e /home/pi/.config/floppyoctoto
 section "interactive install without a key (Enter): the touch screen asks for it"
 status=0
 drive --transcript /tmp/drive3.log \
-  --answers '[["API key", ""], ["display settings", "n"], ["Reboot automatically", ""]]' \
+  --answers '[["API key", ""], ["Reboot automatically", ""]]' \
   -- bash "$src/deploy/install.sh" || status=$?
 check_eq "installer finished" 0 "$status"
 check "warned about the missing key" grep -q "the touch screen asks for it" /tmp/drive3.log
 check_eq "no key in config.json" null "$(config_value api_key)"
-check "display settings declined" cmp /tmp/config.txt.orig $BOOT/config.txt
+check "cmdline.txt untouched by default" cmp /tmp/cmdline.txt.orig $BOOT/cmdline.txt
+check "config.txt untouched by default" cmp /tmp/config.txt.orig $BOOT/config.txt
 check "no key: plugin not offered" bash -c "! grep -q 'Install the Cancel Objects plugin' /tmp/drive3.log"
 floppyoctotouch-uninstall --non-interactive --purge
 
@@ -387,7 +388,7 @@ rm -f $PLUGIN
 section "Cancel Objects declined: answer no, then --no-cancel-plugin"
 status=0
 drive --transcript /tmp/drive-no-plugin.log --answers "$(printf '%s' \
-  '[["API key", "'"$KEY"'"], ["Cancel Objects plugin", "n"], ["display settings", "n"], ["Reboot automatically", ""]]')" \
+  '[["API key", "'"$KEY"'"], ["Cancel Objects plugin", "n"], ["Reboot automatically", ""]]')" \
   -- bash "$src/deploy/install.sh" || status=$?
 check_eq "installer finished" 0 "$status"
 check "plugin not installed (answer no)" test ! -e $PLUGIN
@@ -398,6 +399,20 @@ bash "$src/deploy/install.sh" --non-interactive --api-key="$KEY" --skip-display-
 check "plugin not installed (--no-cancel-plugin)" test ! -e $PLUGIN
 check "summary says why" grep -q "not installed (--no-cancel-plugin)" /tmp/plugin-flag.log
 floppyoctotouch-uninstall --non-interactive --purge
+
+section "32-bit kernel warning (fake uname -m / MemTotal: the container cannot change them)"
+advice() { bash -c '. "$1/deploy/lib/common.sh"; shift; kernel_memory_advice "$@"' _ "$src" "$@" 2>&1; }
+kboot=$(mktemp -d)
+kmods=$(mktemp -d)
+check_eq "64-bit kernel: nothing" "" "$(advice aarch64 7900000 "$kboot" "$kmods")"
+check_eq "32-bit kernel with 2 GB: nothing" "" "$(advice armv7l 1900000 "$kboot" "$kmods")"
+check "32-bit kernel with 8 GB, no kernel8.img: warning" bash -c \
+  "grep -q 'with 8 GB of RAM' <<<\"\$1\" && grep -q 'is not installed' <<<\"\$1\"" _ "$(advice armv7l 7900000 "$kboot" "$kmods")"
+touch "$kboot/kernel8.img"
+mkdir "$kmods/6.12.47+rpt-rpi-v8"
+check "32-bit kernel with 8 GB, kernel8.img and -v8 modules: arm_64bit=1" bash -c \
+  "grep -q 'set arm_64bit=1 in $kboot/config.txt' <<<\"\$1\"" _ "$(advice armv7l 7900000 "$kboot" "$kmods")"
+check "installer on this container: no kernel warning" bash -c "! grep -q '32-bit kernel' /tmp/plugin-flag.log"
 
 printf '\n%d passed, %d failed\n' "$PASSED" "$FAILED"
 [ "$FAILED" = 0 ]
