@@ -17,6 +17,7 @@ from .display import Display, DisplayError, valid_mode
 from .files import FilesApi
 from .proxy import CLIENT_SESSION, OctoPrintProxy, WebcamProxy
 from .settings import SettingsStore
+from .systime import TimeApi, make_backend
 from .watchdog import KioskWatchdog
 
 log = logging.getLogger(__name__)
@@ -226,6 +227,7 @@ def create_app(config: Config) -> web.Application:
     WebcamProxy(config.webcam_url).add_routes(app)
     FilesApi(config, _make_watchdog(config)).add_routes(app)
     ControlApi(config).add_routes(app)
+    TimeApi(make_backend(config.time_backend, config.time_command)).add_routes(app)
 
     static = _static_handler(config.static_dir)
     app.router.add_get("/{tail:.*}", static)

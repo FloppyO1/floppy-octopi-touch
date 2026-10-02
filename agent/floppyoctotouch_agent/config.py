@@ -50,6 +50,16 @@ class Config:
     kiosk_watchdog_s: float = 60
     # File system shown as "disk" on the System screen (the SD card on the Pi).
     disk_path: Path = Path("/")
+    # Date and time of the Pi: "timedatectl", "fake" (development, kept in memory) or "none".
+    time_backend: str = "timedatectl"
+    # Changes time zone, NTP or clock (deploy/time/time-set.sh through sudo); empty = read-only.
+    time_command: list[str] = field(
+        default_factory=lambda: [
+            "sudo",
+            "-n",
+            "/opt/floppyoctotouch/deploy/time/time-set.sh",
+        ]
+    )
     # Where the configuration was read from (the API key is saved there) and which keys came from
     # the environment (they win again at the next start). Not read from the file itself.
     config_path: Path = DEFAULT_CONFIG_PATH
@@ -66,6 +76,7 @@ class Config:
         self.usb_roots = [Path(p).expanduser() for p in self.usb_roots]
         self.usb_eject_command = [str(part) for part in self.usb_eject_command]
         self.kiosk_restart_command = [str(part) for part in self.kiosk_restart_command]
+        self.time_command = [str(part) for part in self.time_command]
         self.usb_max_file_mb = int(self.usb_max_file_mb)
         self.kiosk_watchdog_s = float(self.kiosk_watchdog_s)
 
@@ -88,9 +99,11 @@ _ENV = {
     "FOT_KIOSK_RESTART_COMMAND": "kiosk_restart_command",
     "FOT_KIOSK_WATCHDOG_S": "kiosk_watchdog_s",
     "FOT_DISK_PATH": "disk_path",
+    "FOT_TIME_BACKEND": "time_backend",
+    "FOT_TIME_COMMAND": "time_command",
 }
 _NOT_FROM_FILE = {"config_path", "env_overrides"}
-_COMMANDS = ("usb_eject_command", "kiosk_restart_command")
+_COMMANDS = ("usb_eject_command", "kiosk_restart_command", "time_command")
 
 
 def load_config(environ: dict[str, str] | None = None) -> Config:

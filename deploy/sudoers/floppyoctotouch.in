@@ -1,3 +1,5 @@
 # FloppyOctoTouch: the only commands the agent runs as root (rendered by install.sh, removed by uninstall.sh).
 @USER@ ALL=(root) NOPASSWD: @SYSTEMCTL@ restart floppyoctotouch-kiosk.service
 @USER@ ALL=(root) NOPASSWD: @PREFIX@/deploy/usb/usb-mount.sh eject /media/usb-*
+# Date and time (System → Settings): time-set.sh checks every argument again before timedatectl.
+@USER@ ALL=(root) NOPASSWD: @PREFIX@/deploy/time/time-set.sh timezone *, @PREFIX@/deploy/time/time-set.sh ntp on, @PREFIX@/deploy/time/time-set.sh ntp off, @PREFIX@/deploy/time/time-set.sh set *

@@ -106,6 +106,7 @@ def make_client(aiohttp_client, upstream, tmp_path):
             "usb_roots": [tmp_path / "media" / "usb*"],
             "usb_eject_command": [],
             "kiosk_restart_command": [],
+            "time_backend": "none",
             "config_path": tmp_path / "config.json",
         }
         config = Config(**(values | overrides))

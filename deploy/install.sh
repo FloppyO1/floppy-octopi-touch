@@ -684,6 +684,8 @@ data.update({
     ],
     "display_backend": "wlr-randr",
     "display_output": env["FOT_C_OUTPUT"],
+    "time_backend": "timedatectl",
+    "time_command": ["sudo", "-n", env["FOT_C_PREFIX"] + "/deploy/time/time-set.sh"],
 })
 if env.get("FOT_C_API_KEY"):
     data["api_key"] = env["FOT_C_API_KEY"]
@@ -728,8 +730,8 @@ install_system_files() {
   fi
   install -m 440 "$tmp" "$SUDOERS_FILE"
   rm -f "$tmp"
-  command -v sudo >/dev/null || warn "sudo is not installed: USB eject and screen restart will fail"
-  ok "sudo rule for USB eject and screen restart: $SUDOERS_FILE"
+  command -v sudo >/dev/null || warn "sudo is not installed: USB eject, screen restart and date/time will fail"
+  ok "sudo rule for USB eject, screen restart and date/time: $SUDOERS_FILE"
 
   render "$SCRIPT_DIR/udev/99-floppyoctotouch-usb.rules.in" >"$UDEV_RULE"
   chmod 644 "$UDEV_RULE"

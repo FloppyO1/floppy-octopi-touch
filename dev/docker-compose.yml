@@ -80,6 +80,8 @@ services:
       FOT_DISPLAY_BACKEND: none
       # No kiosk session in Docker: "restart kiosk" only logs.
       FOT_KIOSK_RESTART_COMMAND: none
+      # No systemd in Docker: date and time live in memory (System → Settings → Date and time).
+      FOT_TIME_BACKEND: fake
     ports:
       - "127.0.0.1:${AGENT_PORT:-8765}:8765"
     volumes:

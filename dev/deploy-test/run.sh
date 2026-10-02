@@ -149,6 +149,15 @@ check "sudoers rule is valid" visudo -c -q -f /etc/sudoers.d/floppyoctotouch
 check "pi may restart the kiosk" runuser -u pi -- sudo -n -l /usr/bin/systemctl restart floppyoctotouch-kiosk.service
 check "pi may eject a stick" runuser -u pi -- sudo -n -l $PREFIX/deploy/usb/usb-mount.sh eject /media/usb-KINGSTON
 check "pi may not restart OctoPrint" test "$(runuser -u pi -- sudo -n -l /usr/bin/systemctl restart octoprint 2>/dev/null)" = ""
+timeset=$PREFIX/deploy/time/time-set.sh
+check "time wrapper installed, root-owned, executable" bash -c "test -x $timeset && test \"\$(stat -c %U $timeset)\" = root"
+check "pi may set the time zone" runuser -u pi -- sudo -n -l $timeset timezone Europe/Rome
+check "pi may switch network time off" runuser -u pi -- sudo -n -l $timeset ntp off
+check "pi may set the clock" runuser -u pi -- sudo -n -l $timeset set "2026-10-02 18:30:00"
+check "pi may not run other time-set.sh commands" test "$(runuser -u pi -- sudo -n -l $timeset ntp maybe 2>/dev/null)" = ""
+check "pi may not run timedatectl as root" test "$(runuser -u pi -- sudo -n -l /usr/bin/timedatectl set-time 2020-01-01 2>/dev/null)" = ""
+check_eq "config: time_command" "[\"sudo\", \"-n\", \"$timeset\"]" "$(config_value time_command)"
+check_eq "config: time_backend" "timedatectl" "$(config_value time_backend)"
 check "udev rule for pi" grep -q 'usb-mount.sh add %k pi"' /etc/udev/rules.d/99-floppyoctotouch-usb.rules
 for group in video input render; do
   check "pi in the $group group" bash -c "id -nG pi | grep -qw $group"
@@ -238,6 +247,32 @@ check "eject refuses paths outside /media/usb-*" bash -c "! $usb eject /etc 2>/d
 check "eject refuses a mount point that is not mounted" bash -c "! $usb eject /media/usb-NOPE 2>/dev/null"
 check_eq "eject never called systemd-mount" "" "$(cat /tmp/systemd-mount.args 2>/dev/null || true)"
 mv /usr/bin/systemd-mount.real /usr/bin/systemd-mount
+
+# time-set.sh with a fake timedatectl (no systemd here): what reaches it, what is refused.
+cat >/tmp/fake-timedatectl <<'EOF'
+#!/bin/sh
+case $1 in
+  list-timezones) printf 'Europe/Rome\nAmerica/Argentina/Buenos_Aires\nUTC\n' ;;
+  show) cat /tmp/fake-ntp ;;
+  *) printf '%s\n' "$*" >>/tmp/timedatectl.args ;;
+esac
+EOF
+chmod 755 /tmp/fake-timedatectl
+time_args() {
+  rm -f /tmp/timedatectl.args
+  printf '%s\n' "${NTP:-no}" >/tmp/fake-ntp
+  FOT_TIMEDATECTL=/tmp/fake-timedatectl "$timeset" "$@" >/dev/null 2>&1 || true
+  if [ -f /tmp/timedatectl.args ]; then tr '\n' '|' </tmp/timedatectl.args; fi
+}
+check_eq "time zone from the list" "set-timezone America/Argentina/Buenos_Aires|" "$(time_args timezone America/Argentina/Buenos_Aires)"
+check_eq "unknown time zone refused" "" "$(time_args timezone Mars/Olympus)"
+check_eq "time zone with shell characters refused" "" "$(time_args timezone 'Europe/Rome;reboot')"
+check_eq "network time off" "set-ntp false|" "$(time_args ntp off)"
+check_eq "network time on" "set-ntp true|" "$(time_args ntp on)"
+check_eq "manual time with network time off" "set-time 2026-10-02 18:30|" "$(time_args set '2026-10-02 18:30')"
+check_eq "manual time refused while network time is on" "" "$(NTP=yes time_args set '2026-10-02 18:30')"
+check_eq "malformed manual time refused" "" "$(time_args set '2026-02-31 25:00')"
+check_eq "extra arguments refused" "" "$(time_args timezone UTC extra)"
 
 section "install.sh again from the installed copy (idempotent)"
 bash $PREFIX/deploy/install.sh --non-interactive
