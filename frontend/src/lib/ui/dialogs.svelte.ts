@@ -15,7 +15,8 @@ export interface ConfirmRequest {
   title: string;
   message?: string;
   confirmLabel?: string;
-  cancelLabel?: string;
+  /** `null` = an information with a single button (OK resolves true, closing it false). */
+  cancelLabel?: string | null;
   tone?: 'primary' | 'danger' | 'warning';
 }
 

@@ -11,7 +11,7 @@ import { MACRO_COLORS, MACRO_ICONS } from './macros';
 import { sanitizeActions, type CustomAction } from './power';
 import { defaultTerminalFilters, type TerminalFilters } from './terminal';
 
-export const SETTINGS_VERSION = 8;
+export const SETTINGS_VERSION = 9;
 
 export type Language = 'en' | 'it';
 export const LANGUAGES: readonly Language[] = ['en', 'it'];
@@ -114,6 +114,8 @@ export interface Settings {
   customActions: CustomAction[];
   /** PSU Control plugin: also show its switch in the status bar. */
   psu: { statusBar: boolean };
+  /** `remind`: warn once after connecting when OctoPrint's script after Stop leaves something on. */
+  stopScript: { remind: boolean };
 }
 
 /** Presets of a fresh install (also used by "restore defaults"). */
@@ -179,6 +181,7 @@ export function defaultSettings(): Settings {
     files: { sort: 'date', direction: 'desc', view: 'grid' },
     customActions: [],
     psu: { statusBar: false },
+    stopScript: { remind: true },
   };
 }
 
@@ -203,6 +206,8 @@ const MIGRATIONS: Record<number, (doc: Doc) => Doc> = {
   6: (doc) => doc,
   // v8 (session 10): `filament.coolDownAtEnd` (default off) from the defaults.
   7: (doc) => doc,
+  // v9 (session 12): `stopScript.remind` (default on) from the defaults.
+  8: (doc) => doc,
 };
 
 const isObject = (v: unknown): v is Doc => typeof v === 'object' && v !== null && !Array.isArray(v);

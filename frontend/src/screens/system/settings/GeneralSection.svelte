@@ -1,5 +1,5 @@
 <script lang="ts">
-  // Language, accent colour, clock, end-of-print beep and the reset of every setting.
+  // Language, accent colour, end-of-print beep and the reset of every setting.
   import Bell from '@lucide/svelte/icons/bell';
   import Languages from '@lucide/svelte/icons/languages';
   import Palette from '@lucide/svelte/icons/palette';
@@ -25,14 +25,6 @@
         {LANGUAGE_NAMES[locale]}
       </Button>
     {/each}
-  </div>
-  <div data-testid="clock24h">
-    <Toggle
-      label={t('settings.clock24h')}
-      hint={t('settings.clock24hHint')}
-      checked={s.clock24h}
-      onchange={(on) => settings.update((v) => (v.clock24h = on))}
-    />
   </div>
 </Card>
 

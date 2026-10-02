@@ -120,6 +120,9 @@ export const printerProfiles = {
 };
 
 export const getSettings = () => getJson<OctoPrintSettings>('/api/settings');
+/** Saves one G-code script (403 without the SETTINGS permission); OctoPrint fires SettingsUpdated. */
+export const saveGcodeScript = (name: string, script: string) =>
+  postJson('/api/settings', { scripts: { gcode: { [name]: script } } });
 
 export const system = {
   commands: () => getJson<SystemCommands>('/api/system/commands'),

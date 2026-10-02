@@ -2,6 +2,7 @@
   // Settings: sections on the left, the chosen one on the right (scrolls). Every change is saved
   // by the settings store (debounced), no Save button.
   import Cable from '@lucide/svelte/icons/cable';
+  import CalendarClock from '@lucide/svelte/icons/calendar-clock';
   import Cpu from '@lucide/svelte/icons/cpu';
   import MonitorCog from '@lucide/svelte/icons/monitor-cog';
   import Move from '@lucide/svelte/icons/move';
@@ -13,6 +14,7 @@
   import { pressable } from '../../lib/ui/press';
   import type { IconComponent } from '../../lib/ui/types';
   import ConnectionSection from './settings/ConnectionSection.svelte';
+  import DateTimeSection from './settings/DateTimeSection.svelte';
   import DisplaySection from './settings/DisplaySection.svelte';
   import FirmwareSection from './settings/FirmwareSection.svelte';
   import GeneralSection from './settings/GeneralSection.svelte';
@@ -23,6 +25,7 @@
 
   const SECTIONS: Record<SettingsSection, { icon: IconComponent; component: Component }> = {
     general: { icon: SlidersHorizontal, component: GeneralSection },
+    datetime: { icon: CalendarClock, component: DateTimeSection },
     display: { icon: MonitorCog, component: DisplaySection },
     temperature: { icon: Thermometer, component: TemperatureSection },
     motion: { icon: Move, component: MotionSection },

@@ -7,9 +7,10 @@ import { HttpError } from '../../lib/api/http';
 import { plugin, system as systemApi } from '../../lib/api/octoprint';
 import { macroCommands } from '../../lib/core/macros';
 import { parsePluginData, type CustomAction } from '../../lib/core/power';
+import { FIX_COMMENT } from '../../lib/core/stopScript';
 import { plainText, type SystemAction } from '../../lib/core/system';
 import { t } from '../../lib/i18n/index.svelte';
-import { connection, power, printer, settings, system, terminal } from '../../lib/stores';
+import { connection, power, printer, settings, stopScript, system, terminal } from '../../lib/stores';
 import { dialogs } from '../../lib/ui/dialogs.svelte';
 import { toast } from '../../lib/ui/toast.svelte';
 
@@ -178,4 +179,42 @@ export async function resetSettings(): Promise<void> {
   if (!ok) return;
   await settings.reset();
   toast.show(t('settings.resetDone'), { tone: 'ok' });
+}
+
+/** Lines shown in the fix preview and in the manual steps, one per row. */
+const scriptLines = (lines: readonly string[]) => lines.map((line) => `    ${line}`).join('\n');
+
+/**
+ * "Fix" for OctoPrint's script after Stop: preview of the lines appended, then saved through
+ * `/api/settings`. Without the SETTINGS permission (403) or on any failure: the manual steps.
+ * Returns true when the script was saved.
+ */
+export async function fixStopScript(): Promise<boolean> {
+  const missing = stopScript.status?.missing ?? [];
+  if (!missing.length) return false;
+  const lines = scriptLines([FIX_COMMENT, ...missing]);
+  const ok = await dialogs.confirm({
+    title: t('stopScript.fixTitle'),
+    message: t('stopScript.fixMessage', { lines }),
+    confirmLabel: t('stopScript.fix'),
+  });
+  if (!ok) return false;
+  try {
+    await stopScript.fix();
+    toast.show(t('stopScript.fixed'), { tone: 'ok' });
+    return true;
+  } catch (error) {
+    const reason =
+      error instanceof HttpError && error.status === 403
+        ? t('stopScript.forbidden')
+        : t('stopScript.failed', { detail: error instanceof HttpError ? `HTTP ${error.status}` : String(error) });
+    await dialogs.confirm({
+      title: t('stopScript.manualTitle'),
+      message: t('stopScript.manualSteps', { reason, lines: scriptLines(missing) }),
+      confirmLabel: t('common.ok'),
+      cancelLabel: null,
+      tone: 'warning',
+    });
+    return false;
+  }
 }

@@ -10,6 +10,7 @@
   import NoticeDialog from './shell/NoticeDialog.svelte';
   import Screensaver from './shell/Screensaver.svelte';
   import Shell from './shell/Shell.svelte';
+  import StopScriptNotice from './shell/StopScriptNotice.svelte';
 
   const { notices, prompt } = stores;
 
@@ -66,6 +67,7 @@
       <PromptDialog prompt={prompt.active} onanswer={(choice) => prompt.answer(choice)} ondismiss={() => prompt.dismiss()} />
     {/key}
   {/if}
+  <StopScriptNotice />
   <Screensaver />
   <ConnectionOverlay />
 {/if}

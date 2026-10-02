@@ -4,6 +4,7 @@ export type SystemTab = 'overview' | 'settings' | 'about';
 
 export const SETTINGS_SECTIONS = [
   'general',
+  'datetime',
   'display',
   'temperature',
   'motion',

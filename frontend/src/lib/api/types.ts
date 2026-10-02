@@ -183,7 +183,7 @@ export interface PrinterProfile {
     origin: 'lowerleft' | 'center';
   };
   axes: Record<'x' | 'y' | 'z' | 'e', { speed: number; inverted: boolean }>;
-  extruder: { count: number; nozzleDiameter: number; defaultExtrusionLength: number };
+  extruder: { count: number; nozzleDiameter: number; defaultExtrusionLength: number; sharedNozzle?: boolean };
 }
 
 // ------------------------------------------------------------------ settings (subset)
@@ -211,6 +211,9 @@ export interface OctoPrintSettings {
     webcams?: WebcamInfo[];
   };
   plugins?: Record<string, unknown>;
+  /** G-code scripts by name (`afterPrintCancelled`, `snippets/disable_bed`…), templates as stored;
+   *  only for users with SETTINGS_READ. Saving them needs the SETTINGS permission. */
+  scripts?: { gcode?: Record<string, string> };
 }
 
 // ------------------------------------------------------------------ system commands

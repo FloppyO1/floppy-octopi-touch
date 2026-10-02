@@ -14,6 +14,7 @@ export { job, printer } from './printer.svelte';
 export { prompt } from './prompt.svelte';
 export { server } from './server.svelte';
 export { settings } from './settings.svelte';
+export { stopScript } from './stopScript.svelte';
 export { system } from './system.svelte';
 export { temperatures } from './temperatures.svelte';
 export { terminal } from './terminal.svelte';

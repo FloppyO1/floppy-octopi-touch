@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatBytes, formatClock, formatDuration, formatTemp } from './format';
+import { formatBytes, formatClock, formatDuration, formatFileDate, formatLongDate, formatTemp, useTimeZone } from './format';
 
 describe('format', () => {
   it('formats temperatures', () => {
@@ -23,5 +23,17 @@ describe('format', () => {
 
   it('uses a 24 h clock by default', () => {
     expect(formatClock(new Date(2026, 0, 1, 18, 5, 9), false, true)).toMatch(/18.05.09/);
+  });
+
+  it('shows wall-clock times in the time zone of the Pi', () => {
+    let zone: string | undefined = 'Europe/Rome';
+    useTimeZone(() => zone);
+    const moment = new Date(Date.UTC(2026, 6, 1, 22, 30));
+    expect(formatClock(moment)).toMatch(/00.30/);
+    expect(formatLongDate(moment, 'en-GB')).toBe('Thursday 2 July');
+    zone = 'America/Sao_Paulo';
+    expect(formatClock(moment)).toMatch(/19.30/);
+    expect(formatFileDate(moment.getTime() / 1000, 'en-GB')).toBe('1 Jul 2026, 19:30');
+    useTimeZone(() => undefined);
   });
 });

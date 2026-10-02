@@ -27,13 +27,36 @@ export function formatBytes(bytes: number | null | undefined): string {
   return `${value.toFixed(value >= 100 || unit === 0 ? 0 : 1)} ${units[unit]}`;
 }
 
-/** Wall clock, always 24 h unless `hour12` (the Pi's time zone applies). */
+let timeZoneSource: () => string | undefined = () => undefined;
+
+/**
+ * Wall-clock times use the Pi's time zone (System → Settings → Date and time), not whatever the
+ * browser started with: a new zone shows at once, without restarting the kiosk. The clock store
+ * passes a reactive getter; `undefined` = the browser's own zone.
+ */
+export function useTimeZone(source: () => string | undefined): void {
+  timeZoneSource = source;
+}
+
+/** Wall clock, always 24 h unless `hour12`. */
 export function formatClock(date: Date, hour12 = false, seconds = false): string {
   return new Intl.DateTimeFormat(undefined, {
     hour: '2-digit',
     minute: '2-digit',
     second: seconds ? '2-digit' : undefined,
     hourCycle: hour12 ? 'h12' : 'h23',
+    timeZone: timeZoneSource(),
+  }).format(date);
+}
+
+/** Weekday and date, e.g. "Friday 2 October" (screensaver, Date and time settings). */
+export function formatLongDate(date: Date, locale?: string, year = false): string {
+  return new Intl.DateTimeFormat(locale, {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    year: year ? 'numeric' : undefined,
+    timeZone: timeZoneSource(),
   }).format(date);
 }
 
@@ -47,5 +70,6 @@ export function formatFileDate(seconds: number | null | undefined, locale?: stri
     hour: '2-digit',
     minute: '2-digit',
     hourCycle: hour12 ? 'h12' : 'h23',
+    timeZone: timeZoneSource(),
   }).format(new Date(seconds * 1000));
 }

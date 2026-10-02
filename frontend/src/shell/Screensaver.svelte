@@ -5,7 +5,7 @@
   import { onMount, untrack } from 'svelte';
   import { fade } from 'svelte/transition';
   import { getDisplayState, setDisplayPower } from '../lib/api/agent';
-  import { formatClock, formatDuration } from '../lib/core/format';
+  import { formatClock, formatDuration, formatLongDate } from '../lib/core/format';
   import { heaterTone } from '../lib/core/gauge';
   import { phaseTone } from '../lib/core/printerState';
   import { i18n, t } from '../lib/i18n/index.svelte';
@@ -15,9 +15,7 @@
   const mode = $derived(idle.mode);
   const hour12 = $derived(!settings.value.clock24h);
   const heaters = $derived(temperatures.heaters.filter((h) => h === 'bed' || h.startsWith('tool')));
-  const date = $derived(
-    new Intl.DateTimeFormat(i18n.locale, { weekday: 'long', day: 'numeric', month: 'long' }).format(clock.now),
-  );
+  const date = $derived(formatLongDate(clock.now, i18n.locale));
   const phase = $derived(connection.live ? t(`phase.${printer.phase}`) : t('status.offline'));
   const round = (v: number | null | undefined) => (v == null ? '—' : Math.round(v).toString());
 

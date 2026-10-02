@@ -36,6 +36,35 @@ export const putApiKey = (apiKey: string) => putJson<ApiKeyState>('/local/apikey
 /** Restarts cage + Chromium; `restarted: false` when no command is configured (development). */
 export const restartKiosk = () => postJson<{ restarted: boolean }>('/local/kiosk/restart', {});
 
+/** Date, time and time zone of the Pi (`timedatectl`; in development a clock kept by the agent). */
+export type TimeState =
+  | { available: false; detail: string; now: number }
+  | {
+      available: true;
+      backend: 'timedatectl' | 'fake';
+      /** False without the sudo wrapper (`time_command`): the settings are read-only. */
+      canChange: boolean;
+      timezone: string;
+      utcOffsetMinutes: number | null;
+      dst: boolean | null;
+      abbreviation: string | null;
+      /** Milliseconds since the epoch on the Pi. */
+      now: number;
+      ntp: boolean;
+      ntpAvailable: boolean;
+      synchronized: boolean;
+      /** Only with `getTime(true)`. */
+      timezones?: string[];
+    };
+export interface TimeChange {
+  timezone?: string;
+  ntp?: boolean;
+  /** `YYYY-MM-DD HH:MM:SS`, local time of the Pi; refused (409 `ntp_active`) while NTP is on. */
+  datetime?: string;
+}
+export const getTime = (zones = false) => getJson<TimeState>(`/local/time${zones ? '?zones=1' : ''}`);
+export const setTime = (change: TimeChange) => postJson<TimeState>('/local/time', change);
+
 /** Printed objects of a local file and their footprint on the bed (cancel object). */
 export const getObjects = (path: string) => getJson<ObjectsReport>(`/local/objects${query({ path })}`);
 

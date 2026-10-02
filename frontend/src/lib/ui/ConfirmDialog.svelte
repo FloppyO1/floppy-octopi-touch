@@ -9,7 +9,7 @@
     title: string;
     message?: string;
     confirmLabel?: string;
-    cancelLabel?: string;
+    cancelLabel?: string | null;
     /** `danger` for destructive actions (stop print, delete), `warning` for risky ones. */
     tone?: 'primary' | 'danger' | 'warning';
     onconfirm: () => void;
@@ -30,7 +30,9 @@
 >
   {#if message}<p>{message}</p>{/if}
   {#snippet actions()}
-    <Button variant="secondary" size="lg" onclick={oncancel}>{cancelLabel ?? t('common.cancel')}</Button>
+    {#if cancelLabel !== null}
+      <Button variant="secondary" size="lg" onclick={oncancel}>{cancelLabel ?? t('common.cancel')}</Button>
+    {/if}
     <Button variant={tone} size="lg" onclick={onconfirm}>{confirmLabel ?? t('common.confirm')}</Button>
   {/snippet}
 </Modal>

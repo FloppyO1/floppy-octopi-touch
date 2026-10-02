@@ -153,8 +153,18 @@ describe('migrateSettings', () => {
   it('migrates v7 documents to v8: no cooling at the end of the filament wizard', () => {
     const { settings, changed } = migrateSettings({ schemaVersion: 7, filament: { extruderType: 'direct', purgeLength: 30 } });
     expect(changed).toBe(true);
-    expect(settings.schemaVersion).toBe(8);
+    expect(settings.schemaVersion).toBe(SETTINGS_VERSION);
     expect(settings.filament).toMatchObject({ extruderType: 'direct', purgeLength: 30, coolDownAtEnd: false });
+  });
+
+  it('migrates v8 documents to v9: the warning about the script after Stop is on', () => {
+    const { settings, changed } = migrateSettings({ schemaVersion: 8, clock24h: false });
+    expect(changed).toBe(true);
+    expect(settings.schemaVersion).toBe(9);
+    expect(settings.clock24h).toBe(false);
+    expect(settings.stopScript).toEqual({ remind: true });
+    expect(migrateSettings({ schemaVersion: 9, stopScript: { remind: false } }).settings.stopScript.remind).toBe(false);
+    expect(migrateSettings({ schemaVersion: 9, stopScript: { remind: 'no' } }).settings.stopScript.remind).toBe(true);
   });
 
   it('keeps documents from a newer release without downgrading them', () => {
